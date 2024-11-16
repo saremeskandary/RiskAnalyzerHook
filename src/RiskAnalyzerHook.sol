@@ -7,8 +7,9 @@ import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "v4-core/src/types/BeforeSwapDelta.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import {BaseHook} from "v4-periphery/src/base/hooks/BaseHook.sol";
 import "./interfaces.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title RiskAnalyzerHook
@@ -41,7 +42,6 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
 
     // Errors
     error RiskTooHigh();
-    error InvalidPool();
     error UnauthorizedCallback();
 
     constructor(
@@ -62,6 +62,24 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
         riskAggregator = IRiskAggregator(_riskAggregator);
         riskNotifier = IRiskNotifier(_riskNotifier);
     }
+
+    /**
+     * @notice Returns the hooks that this contract implements
+     * @return The hooks bitmap indicating which hooks are implemented
+     */
+    function getHooksCalls() public pure virtual override returns (uint16) { 
+        return Hooks.Calls({
+            beforeInitialize: false,
+            afterInitialize: false,
+            beforeModifyPosition: true,
+            afterModifyPosition: true,
+            beforeSwap: true,
+            afterSwap: true,
+            beforeDonate: false,
+            afterDonate: false
+        });
+    }
+
 
     /**
      * @notice Hook callback before swap
@@ -110,26 +128,28 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
     }
 
     /**
-     * @notice Hook callback before modify position
+     * @notice Hook callback before modifying liquidity
      */
     function beforeModifyPosition(
         address sender,
         PoolKey calldata key,
-        IPoolManager.ModifyPositionParams calldata params
+        IPoolManager.ModifyLiquidityParams calldata params
     ) external override returns (bytes4) {
         if (msg.sender != address(poolManager)) revert UnauthorizedCallback();
         
         bytes32 poolId = key.toId();
         RiskMetrics storage metrics = poolMetrics[poolId];
         
-        // Update position risk
-        positionManager.updatePosition(
+        // Update liquidity position risk
+        positionManager.updatePositionRisk(
             sender,
             poolId,
-            uint256(params.liquidityDelta),
-            params.tickLower,
-            params.tickUpper,
-            metrics.lastPrice
+            _calculatePositionRisk(
+                poolId,
+                uint256(params.liquidityDelta),
+                params.tickLower,
+                params.tickUpper
+            )
         );
         
         // Check concentration risk
@@ -142,12 +162,12 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
     }
 
     /**
-     * @notice Hook callback after modify position
+     * @notice Hook callback after modifying liquidity
      */
     function afterModifyPosition(
         address sender,
         PoolKey calldata key,
-        IPoolManager.ModifyPositionParams calldata params,
+        IPoolManager.ModifyLiquidityParams calldata params,
         BalanceDelta delta
     ) external override returns (bytes4) {
         if (msg.sender != address(poolManager)) revert UnauthorizedCallback();
@@ -156,6 +176,18 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
         _updatePoolMetrics(poolId, 0, uint256(delta.amount0()));
         
         return BaseHook.afterModifyPosition.selector;
+    }
+
+    /**
+     * @notice Calculate position risk score
+     */
+    function _calculatePositionRisk(
+        bytes32 poolId,
+        uint256 liquidityDelta,
+        int24 tickLower,
+        int24 tickUpper
+    ) internal view returns (uint256) {
+        return riskAggregator.aggregatePoolRisk(poolId);
     }
 
     /**
