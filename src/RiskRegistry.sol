@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Ownable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/access/Ownable.sol";
+import {ReentrancyGuard} from
+    "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import {Pausable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
+import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
 import "./interfaces.sol";
 
 /**
@@ -21,12 +23,6 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
     // List of registered pools
     bytes32[] public registeredPools;
 
-    // Events
-    event ManagerAdded(bytes32 indexed poolId, address indexed manager);
-    event ManagerRemoved(bytes32 indexed poolId, address indexed manager);
-    event PoolRegistered(bytes32 indexed poolId, address indexed registrar);
-    event RiskParametersUpdated(bytes32 indexed poolId, RiskParameters params);
-
     // Errors
     error PoolAlreadyRegistered();
     error PoolNotRegistered();
@@ -34,12 +30,17 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
     error InvalidParameters();
     error PoolInactive();
 
+    event ManagerAdded(PoolId indexed poolId, address indexed manager);
+    event ManagerRemoved(PoolId indexed poolId, address indexed manager);
+    event PoolRegistered(PoolId indexed poolId, address indexed registrar);
+    event RiskParametersUpdated(PoolId indexed poolId, RiskParameters params);
+
     constructor() Ownable(msg.sender) {}
 
     /**
      * @notice Modifier to check if caller is authorized manager
      */
-    modifier onlyPoolManager(bytes32 poolId) {
+    modifier onlyPoolManager(PoolId poolId) {
         if (!poolManagers[poolId][msg.sender] && msg.sender != owner()) {
             revert UnauthorizedManager();
         }
@@ -51,7 +52,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
      * @param poolId Unique identifier for the pool
      * @param params Initial risk parameters
      */
-    function registerPool(bytes32 poolId, RiskParameters memory params) external override onlyOwner {
+    function registerPool(PoolId poolId, RiskParameters memory params) external override onlyOwner {
         if (poolParameters[poolId].isActive) revert PoolAlreadyRegistered();
         if (params.volatilityThreshold == 0 || params.liquidityThreshold == 0) {
             revert InvalidParameters();
@@ -70,7 +71,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
      * @param poolId Pool identifier
      * @param newParams Updated risk parameters
      */
-    function updatePoolParameters(bytes32 poolId, RiskParameters memory newParams)
+    function updatePoolParameters(PoolId poolId, RiskParameters memory newParams)
         external
         override
         onlyPoolManager(poolId)
@@ -91,7 +92,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
      * @notice Get risk parameters for pool
      * @param poolId Pool identifier
      */
-    function getPoolParameters(bytes32 poolId) external view override returns (RiskParameters memory) {
+    function getPoolParameters(PoolId poolId) external view override returns (RiskParameters memory) {
         if (!poolParameters[poolId].isActive) revert PoolInactive();
         return poolParameters[poolId];
     }
@@ -100,7 +101,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
      * @notice Deactivate pool monitoring
      * @param poolId Pool identifier
      */
-    function deactivatePool(bytes32 poolId) external override onlyOwner {
+    function deactivatePool(PoolId poolId) external override onlyOwner {
         if (!poolParameters[poolId].isActive) revert PoolInactive();
         poolParameters[poolId].isActive = false;
     }
@@ -109,7 +110,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
      * @notice Activate pool monitoring
      * @param poolId Pool identifier
      */
-    function activatePool(bytes32 poolId) external override onlyOwner {
+    function activatePool(PoolId poolId) external override onlyOwner {
         if (poolParameters[poolId].volatilityThreshold == 0) revert PoolNotRegistered();
         poolParameters[poolId].isActive = true;
     }
@@ -117,7 +118,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Add authorized manager for pool
      */
-    function addPoolManager(bytes32 poolId, address manager) external onlyOwner whenNotPaused {
+    function addPoolManager(PoolId poolId, address manager) external onlyOwner whenNotPaused {
         if (!poolParameters[poolId].isActive) revert PoolInactive();
         poolManagers[poolId][manager] = true;
         emit ManagerAdded(poolId, manager);
@@ -126,7 +127,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Remove authorized manager for pool
      */
-    function removePoolManager(bytes32 poolId, address manager) external onlyOwner {
+    function removePoolManager(PoolId poolId, address manager) external onlyOwner {
         poolManagers[poolId][manager] = false;
         emit ManagerRemoved(poolId, manager);
     }
@@ -139,9 +140,37 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
     }
 
     /**
+     * @notice Get detailed information for all pools
+     * @return poolInfos Array of pool information including parameters and status
+     */
+    function getAllPoolInfo() external view returns (PoolInfo[] memory poolInfos) {
+        uint256 count = registeredPools.length;
+        poolInfos = new PoolInfo[](count);
+
+        for (uint256 i = 0; i < count; i++) {
+            PoolId poolId = registeredPools[i];
+            poolInfos[i] = PoolInfo({
+                poolId: poolId,
+                parameters: poolParameters[poolId],
+                registrationTime: block.timestamp, // Note: This would need a registration time mapping in actual implementation
+                isRegistered: poolParameters[poolId].isActive
+            });
+        }
+    }
+
+    /**
+     * @notice Check if a pool is registered
+     * @param poolId The pool ID to check
+     * @return isRegistered True if the pool is registered
+     */
+    function isPoolRegistered(PoolId poolId) external view returns (bool isRegistered) {
+        return poolParameters[poolId].isActive;
+    }
+
+    /**
      * @notice Check if address is authorized manager
      */
-    function isPoolManager(bytes32 poolId, address manager) external view returns (bool) {
+    function isPoolManager(PoolId poolId, address manager) external view returns (bool) {
         return poolManagers[poolId][manager];
     }
 

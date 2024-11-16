@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Ownable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/access/Ownable.sol";
+import {ReentrancyGuard} from
+    "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import {Pausable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
 import "./interfaces.sol";
+import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
 
 /**
  * @title RiskController
@@ -41,16 +43,18 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     uint256 public constant MAX_ACTIONS_BEFORE_THROTTLE = 3;
 
     // Events
-    event ActionExecuted(bytes32 indexed poolId, ActionType indexed actionType, uint256 timestamp);
+    event ActionExecuted(PoolId indexed poolId, ActionType indexed actionType, uint256 timestamp);
 
-    event ControlsReset(bytes32 indexed poolId, uint256 timestamp);
+    event ControlsReset(PoolId indexed poolId, uint256 timestamp);
 
-    event ThrottleActivated(bytes32 indexed poolId, uint256 endTime);
+    event ThrottleActivated(PoolId indexed poolId, uint256 endTime);
 
-    event EmergencyAction(bytes32 indexed poolId, string reason);
+    event EmergencyAction(PoolId indexed poolId, string reason);
 
     // Errors
+    error InvalidAddress();
     error ActionCoolingDown();
+    error ActionFailed();
     error InvalidPoolId();
     error InvalidAction();
     error AlreadyInState();
@@ -72,7 +76,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
      * @param poolId Pool identifier
      * @param actionType Type of action to execute
      */
-    function executeAction(bytes32 poolId, ActionType actionType)
+    function executeAction(PoolId poolId, ActionType actionType)
         external
         override
         onlyOwner
@@ -108,7 +112,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
      * @notice Get current control status
      * @param poolId Pool identifier
      */
-    function getControlStatus(bytes32 poolId)
+    function getControlStatus(PoolId poolId)
         external
         view
         override
@@ -122,7 +126,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
      * @notice Reset control status
      * @param poolId Pool identifier
      */
-    function resetControls(bytes32 poolId) external override onlyOwner {
+    function resetControls(PoolId poolId) external override onlyOwner {
         ControlStatus storage status = poolStatus[poolId];
 
         status.isPaused = false;
@@ -157,7 +161,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Execute specific action type
      */
-    function _executeSpecificAction(bytes32 poolId, ActionType actionType) internal returns (bool) {
+    function _executeSpecificAction(PoolId poolId, ActionType actionType) internal returns (bool) {
         ControlStatus storage status = poolStatus[poolId];
 
         if (actionType == ActionType.WARNING) {
@@ -176,7 +180,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Execute warning action
      */
-    function _executeWarning(bytes32 poolId) internal returns (bool) {
+    function _executeWarning(PoolId poolId) internal returns (bool) {
         string memory message = "Risk level elevated - Warning issued";
         notifier.notifyUser(msg.sender, 1, message);
         return true;
@@ -185,7 +189,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Execute throttle action
      */
-    function _executeThrottle(bytes32 poolId) internal returns (bool) {
+    function _executeThrottle(PoolId poolId) internal returns (bool) {
         ControlStatus storage status = poolStatus[poolId];
         if (status.isThrottled) revert AlreadyInState();
 
@@ -196,7 +200,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Execute pause action
      */
-    function _executePause(bytes32 poolId) internal returns (bool) {
+    function _executePause(PoolId poolId) internal returns (bool) {
         ControlStatus storage status = poolStatus[poolId];
         if (status.isPaused) revert AlreadyInState();
 
@@ -212,7 +216,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Execute emergency action
      */
-    function _executeEmergency(bytes32 poolId) internal returns (bool) {
+    function _executeEmergency(PoolId poolId) internal returns (bool) {
         ControlStatus storage status = poolStatus[poolId];
 
         status.isPaused = true;
@@ -228,7 +232,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Activate throttling for a pool
      */
-    function _activateThrottle(bytes32 poolId) internal {
+    function _activateThrottle(PoolId poolId) internal {
         ControlStatus storage status = poolStatus[poolId];
 
         status.isThrottled = true;
@@ -254,7 +258,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Check if pool is currently throttled
      */
-    function isPoolThrottled(bytes32 poolId) external view returns (bool) {
+    function isPoolThrottled(PoolId poolId) external view returns (bool) {
         ControlStatus storage status = poolStatus[poolId];
         return status.isThrottled && block.timestamp < status.throttleEndTime;
     }
@@ -262,7 +266,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Get detailed control metrics
      */
-    function getControlMetrics(bytes32 poolId)
+    function getControlMetrics(PoolId poolId)
         external
         view
         returns (uint256 actionCount, uint256 throttleEndTime, ActionType lastAction, bool isPaused, bool isThrottled)

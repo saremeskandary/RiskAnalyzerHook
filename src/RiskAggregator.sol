@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "./interfaces.sol";
+import {Ownable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/access/Ownable.sol";
+import {Pausable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
+import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
 import "../lib/RiskMath.sol";
+import "./interfaces.sol";
 
 /**
  * @title RiskAggregator
@@ -38,7 +39,7 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
     }
 
     // Risk score cache
-    mapping(bytes32 => RiskCache) public poolRiskCache;
+    mapping(PoolId => RiskCache) public poolRiskCache;
     mapping(address => RiskCache) public userRiskCache;
 
     // System metrics
@@ -52,7 +53,7 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
     SystemMetrics public systemMetrics;
 
     // Events
-    event RiskScoreUpdated(bytes32 indexed poolId, uint256 newScore, uint256 timestamp);
+    event RiskScoreUpdated(PoolId indexed poolId, uint256 newScore, uint256 timestamp);
 
     event UserRiskUpdated(address indexed user, uint256 newScore, uint256 timestamp);
 
@@ -83,7 +84,7 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
      * @notice Aggregate risk metrics for a pool
      * @param poolId Pool identifier
      */
-    function aggregatePoolRisk(bytes32 poolId) external override whenNotPaused returns (uint256 totalRiskScore) {
+    function aggregatePoolRisk(PoolId poolId) external override whenNotPaused returns (uint256 totalRiskScore) {
         if (poolId == bytes32(0)) revert InvalidPoolId();
 
         RiskCache storage cache = poolRiskCache[poolId];
@@ -208,7 +209,7 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
     /**
      * @notice Calculate liquidity score
      */
-    function _calculateLiquidityScore(bytes32 poolId) internal view returns (uint256) {
+    function _calculateLiquidityScore(PoolId poolId) internal view returns (uint256) {
         IRiskRegistry.RiskParameters memory params = riskRegistry.getPoolParameters(poolId);
 
         uint256 liquidityThreshold = params.liquidityThreshold;
@@ -224,7 +225,7 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
     /**
      * @notice Calculate position score
      */
-    function _calculatePositionScore(bytes32 poolId) internal view returns (uint256) {
+    function _calculatePositionScore(PoolId poolId) internal view returns (uint256) {
         IPositionManager.PositionData memory position = positionManager.getPositionData(address(this), poolId);
 
         return position.riskScore;
@@ -254,7 +255,7 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
     /**
      * @notice Force cache refresh for pool
      */
-    function refreshPoolCache(bytes32 poolId) external onlyOwner {
+    function refreshPoolCache(PoolId poolId) external onlyOwner {
         delete poolRiskCache[poolId];
     }
 
@@ -290,7 +291,7 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
     /**
      * @notice Get raw risk components for pool
      */
-    function getRiskComponents(bytes32 poolId)
+    function getRiskComponents(PoolId poolId)
         external
         view
         returns (uint256 volatilityRisk, uint256 liquidityRisk, uint256 positionRisk)

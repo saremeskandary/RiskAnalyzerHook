@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
+import {Ownable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/access/Ownable.sol";
+import {Math} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import {Pausable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
 import "./interfaces.sol";
 import "../lib/RiskMath.sol";
 import "../lib/PriceLib.sol";
+import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
 
 /**
  * @title LiquidityScoring
@@ -20,7 +21,7 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
     mapping(address => TokenInfo) public tokenInfo;
 
     // Storage for historical liquidity data
-    mapping(bytes32 => LiquidityHistory) public liquidityHistory;
+    mapping(PoolId => LiquidityHistory) public liquidityHistory;
 
     // Window size for historical data (in number of data points)
     uint256 public constant HISTORY_WINDOW = 24;
@@ -37,7 +38,7 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
     uint256 public constant MIN_TOKEN_PRICE = 1e6;
 
     // Events
-    event LiquidityScoreCalculated(bytes32 indexed poolId, uint256 score, uint256 timestamp);
+    event LiquidityScoreCalculated(PoolId indexed poolId, uint256 score, uint256 timestamp);
 
     event TokenInfoUpdated(address indexed token, uint256 marketCap, uint256 dailyVolume);
 
@@ -57,7 +58,7 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
         int256 currentPrice,
         address token0,
         address token1,
-        bytes32 poolId,
+        PoolId poolId,
         int24 tickLower,
         int24 tickUpper
     ) external override whenNotPaused returns (uint256) {
@@ -145,7 +146,7 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
     /**
      * @notice Calculate stability score based on historical data
      */
-    function calculateStabilityScore(bytes32 poolId, uint256 currentLiquidity) public view override returns (uint256) {
+    function calculateStabilityScore(PoolId poolId, uint256 currentLiquidity) public view override returns (uint256) {
         LiquidityHistory storage history = liquidityHistory[poolId];
 
         if (history.liquidityValues.length < 2) {
@@ -196,7 +197,7 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
     /**
      * @notice Update liquidity history
      */
-    function updateLiquidityHistory(bytes32 poolId, uint256 newLiquidity) internal {
+    function updateLiquidityHistory(PoolId poolId, uint256 newLiquidity) internal {
         LiquidityHistory storage history = liquidityHistory[poolId];
 
         if (history.liquidityValues.length == 0) {
@@ -216,7 +217,7 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
     /**
      * @notice Get liquidity history for a pool
      */
-    function getLiquidityHistory(bytes32 poolId)
+    function getLiquidityHistory(PoolId poolId)
         external
         view
         returns (uint256[] memory values, uint256[] memory timestamps)

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
-import {PoolKey} from "v4-core/src/types/PoolKey.sol";
-import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
+import {IPoolManager} from "lib/v4-core/src/interfaces/IPoolManager.sol";
+import {PoolKey} from "lib/v4-core/src/types/PoolKey.sol";
+import {BalanceDelta} from "lib/v4-core/src/types/BalanceDelta.sol";
+import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "lib/v4-core/src/types/BeforeSwapDelta.sol";
+import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
 
 /**
  * @title IRiskAnalyzerHook
@@ -32,51 +34,57 @@ interface IRiskAnalyzerHook {
         bool isActive;
     }
 
+    event PoolInitialized(PoolId indexed poolId);
+    event EmergencyShutdownTriggered(PoolId indexed poolId);
+    event OperationsResumed(PoolId indexed poolId);
+    event CircuitBreakerConfigured(PoolId indexed poolId, uint256 threshold, uint256 cooldownPeriod);
+    event RiskParametersUpdated(PoolId indexed poolId, uint256 volatilityThreshold, uint256 liquidityThreshold);
+
     /**
      * @notice Emitted when risk score is updated
      */
-    event RiskScoreUpdated(bytes32 indexed poolId, uint256 newRiskScore);
+    event RiskScoreUpdated(PoolId indexed poolId, uint256 newRiskScore);
 
     /**
      * @notice Emitted when high risk is detected
      */
-    event HighRiskAlert(bytes32 indexed poolId, uint256 riskScore, string reason);
+    event HighRiskAlert(PoolId indexed poolId, uint256 riskScore, string reason);
 
     /**
      * @notice Emitted when position risk is updated
      */
-    event PositionRiskUpdated(address indexed user, bytes32 indexed poolId, uint256 riskScore);
+    event PositionRiskUpdated(address indexed user, PoolId indexed poolId, uint256 riskScore);
 
     /**
      * @notice Get risk metrics for a pool
      */
-    function getPoolRiskMetrics(bytes32 poolId) external view returns (RiskMetrics memory);
+    function getPoolRiskMetrics(PoolId poolId) external view returns (RiskMetrics memory);
 
     /**
      * @notice Get position risk score for a user
      */
-    function getPositionRiskScore(address user, bytes32 poolId) external view returns (uint256);
+    function getPositionRiskScore(address user, PoolId poolId) external view returns (uint256);
 
     /**
      * @notice Get circuit breaker status
      */
-    function getCircuitBreaker(bytes32 poolId) external view returns (CircuitBreaker memory);
+    function getCircuitBreaker(PoolId poolId) external view returns (CircuitBreaker memory);
 
     /**
      * @notice Update risk parameters
      */
-    function updateRiskParameters(bytes32 poolId, uint256 newVolatilityThreshold, uint256 newLiquidityThreshold)
+    function updateRiskParameters(PoolId poolId, uint256 newVolatilityThreshold, uint256 newLiquidityThreshold)
         external;
 
     /**
      * @notice Emergency shutdown of pool
      */
-    function emergencyShutdown(bytes32 poolId) external;
+    function emergencyShutdown(PoolId poolId) external;
 
     /**
      * @notice Resume pool operations
      */
-    function resumeOperations(bytes32 poolId) external;
+    function resumeOperations(PoolId poolId) external;
 }
 
 /**
@@ -111,7 +119,7 @@ interface ILiquidityScoring {
         int256 currentPrice,
         address token0,
         address token1,
-        bytes32 poolId,
+        PoolId poolId,
         int24 tickLower,
         int24 tickUpper
     ) external returns (uint256);
@@ -135,7 +143,7 @@ interface ILiquidityScoring {
     /**
      * @notice Calculate stability score
      */
-    function calculateStabilityScore(bytes32 poolId, uint256 currentLiquidity) external view returns (uint256);
+    function calculateStabilityScore(PoolId poolId, uint256 currentLiquidity) external view returns (uint256);
 }
 
 /**
@@ -191,17 +199,17 @@ interface IVolatilityOracle {
     /**
      * @notice Get volatility data for a pool
      */
-    function getVolatilityData(bytes32 poolId) external view returns (VolatilityData memory);
+    function getVolatilityData(PoolId poolId) external view returns (VolatilityData memory);
 
     /**
      * @notice Calculate volatility score
      */
-    function calculateVolatility(bytes32 poolId, int256 newPrice) external returns (uint256);
+    function calculateVolatility(PoolId poolId, int256 newPrice) external returns (uint256);
 
     /**
      * @notice Update volatility window size
      */
-    function updateVolatilityWindow(bytes32 poolId, uint256 newWindowSize) external;
+    function updateVolatilityWindow(PoolId poolId, uint256 newWindowSize) external;
 }
 
 /**
@@ -220,29 +228,57 @@ interface IRiskRegistry {
     }
 
     /**
+     * @notice Pool information structure
+     */
+    struct PoolInfo {
+        PoolId poolId;
+        RiskParameters parameters;
+        uint256 registrationTime;
+        bool isRegistered;
+    }
+
+    /**
      * @notice Register new pool for risk monitoring
      */
-    function registerPool(bytes32 poolId, RiskParameters memory params) external;
+    function registerPool(PoolId poolId, RiskParameters memory params) external;
 
     /**
      * @notice Update risk parameters for pool
      */
-    function updatePoolParameters(bytes32 poolId, RiskParameters memory newParams) external;
+    function updatePoolParameters(PoolId poolId, RiskParameters memory newParams) external;
 
     /**
      * @notice Get risk parameters for pool
      */
-    function getPoolParameters(bytes32 poolId) external view returns (RiskParameters memory);
+    function getPoolParameters(PoolId poolId) external view returns (RiskParameters memory);
 
     /**
      * @notice Deactivate pool monitoring
      */
-    function deactivatePool(bytes32 poolId) external;
+    function deactivatePool(PoolId poolId) external;
 
     /**
      * @notice Activate pool monitoring
      */
-    function activatePool(bytes32 poolId) external;
+    function activatePool(PoolId poolId) external;
+
+    /**
+     * @notice Get all registered pools
+     */
+    function getAllPools() external view returns (bytes32[] memory);
+
+    /**
+     * @notice Get detailed information for all pools
+     * @return poolInfos Array of pool information including parameters and status
+     */
+    function getAllPoolInfo() external view returns (PoolInfo[] memory poolInfos);
+
+    /**
+     * @notice Check if a pool is registered
+     * @param poolId The pool ID to check
+     * @return isRegistered True if the pool is registered
+     */
+    function isPoolRegistered(PoolId poolId) external view returns (bool isRegistered);
 }
 
 /**
@@ -264,17 +300,17 @@ interface IPositionManager {
     /**
      * @notice Get position data
      */
-    function getPositionData(address user, bytes32 poolId) external view returns (PositionData memory);
+    function getPositionData(address user, PoolId poolId) external view returns (PositionData memory);
 
     /**
      * @notice Update position risk score
      */
-    function updatePositionRisk(address user, bytes32 poolId, uint256 newRiskScore) external;
+    function updatePositionRisk(address user, PoolId poolId, uint256 newRiskScore) external;
 
     /**
      * @notice Close high risk positions
      */
-    function closeRiskyPosition(address user, bytes32 poolId) external returns (bool);
+    function closeRiskyPosition(address user, PoolId poolId) external returns (bool);
 }
 
 /**
@@ -285,12 +321,12 @@ interface IRiskAggregator {
     /**
      * @notice Aggregate risk metrics for a pool
      */
-    function aggregatePoolRisk(bytes32 poolId) external view returns (uint256 totalRiskScore);
+    function aggregatePoolRisk(PoolId poolId) external returns (uint256 totalRiskScore);
 
     /**
      * @notice Aggregate risk metrics for a user
      */
-    function aggregateUserRisk(address user) external view returns (uint256 totalRiskScore);
+    function aggregateUserRisk(address user) external returns (uint256 totalRiskScore);
 
     /**
      * @notice Get system-wide risk metrics
@@ -316,12 +352,12 @@ interface IRiskController {
     /**
      * @notice Execute risk control action
      */
-    function executeAction(bytes32 poolId, ActionType actionType) external returns (bool);
+    function executeAction(PoolId poolId, ActionType actionType) external returns (bool);
 
     /**
      * @notice Get current control status
      */
-    function getControlStatus(bytes32 poolId)
+    function getControlStatus(PoolId poolId)
         external
         view
         returns (bool isPaused, bool isThrottled, uint256 lastActionTimestamp);
@@ -329,7 +365,7 @@ interface IRiskController {
     /**
      * @notice Reset control status
      */
-    function resetControls(bytes32 poolId) external;
+    function resetControls(PoolId poolId) external;
 }
 
 /**
@@ -375,87 +411,85 @@ interface IUniswapV4RiskAnalyzerHook {
     /**
      * @notice Emitted when risk parameters are updated
      */
-    event RiskParametersUpdated(bytes32 indexed poolId, RiskParameters parameters);
+    event RiskParametersUpdated(PoolId indexed poolId, RiskParameters parameters);
 
     /**
      * @notice Emitted when high risk is detected
      */
-    event HighRiskDetected(bytes32 indexed poolId, uint256 riskScore, string reason);
+    event HighRiskDetected(PoolId indexed poolId, uint256 riskScore, string reason);
 
     /**
      * @notice Emitted when circuit breaker is triggered
      */
-    event CircuitBreakerTriggered(bytes32 indexed poolId, uint256 timestamp);
-
-    /**
-     * @notice Hook called before swap
-     * @dev Implements the beforeSwap hook required by Uniswap v4
-     */
-    function beforeSwap(address sender, PoolKey calldata key, IPoolManager.SwapParams calldata params)
-        external
-        returns (bytes4);
-
-    /**
-     * @notice Hook called after swap
-     * @dev Implements the afterSwap hook required by Uniswap v4
-     */
-    function afterSwap(
-        address sender,
-        PoolKey calldata key,
-        IPoolManager.SwapParams calldata params,
-        BalanceDelta delta
-    ) external returns (bytes4);
+    event CircuitBreakerTriggered(PoolId indexed poolId, uint256 timestamp);
 
     /**
      * @notice Hook called before modifying position
-     * @dev Implements the beforeModifyPosition hook required by Uniswap v4
+     * @dev Implements the beforeModifyLiquidity hook required by Uniswap v4
      */
-    function beforeModifyPosition(
-        address sender,
-        PoolKey calldata key,
-        IPoolManager.ModifyPositionParams calldata params
-    ) external returns (bytes4);
+    // function beforeAddLiquidity(
+    //     address sender,
+    //     PoolKey calldata key,
+    //     IPoolManager.ModifyLiquidityParams calldata params,
+    //     bytes calldata hookData
+    // ) external override returns (bytes4);
+    // function beforeRemoveLiquidity(
+    //     address sender,
+    //     PoolKey calldata key,
+    //     IPoolManager.ModifyLiquidityParams calldata params,
+    //     bytes calldata hookData
+    // ) external override returns (bytes4);
 
-    /**
-     * @notice Hook called after modifying position
-     * @dev Implements the afterModifyPosition hook required by Uniswap v4
-     */
-    function afterModifyPosition(
-        address sender,
-        PoolKey calldata key,
-        IPoolManager.ModifyPositionParams calldata params,
-        BalanceDelta delta
-    ) external returns (bytes4);
+    // /**
+    //  * @notice Hook called after modifying position
+    //  * @dev Implements the afterModifyLiquidity hook required by Uniswap v4
+    //  */
+    // function afterAddLiquidity(
+    //     address sender,
+    //     PoolKey calldata key,
+    //     IPoolManager.ModifyLiquidityParams calldata params,
+    //     BalanceDelta delta,
+    //     BalanceDelta feesAccrued,
+    //     bytes calldata hookData
+    // ) external override returns (bytes4);
+    // function afterRemoveLiquidity(
+    //     address sender,
+    //     PoolKey calldata key,
+    //     IPoolManager.ModifyLiquidityParams calldata params,
+    //     BalanceDelta delta,
+    //     BalanceDelta feesAccrued,
+    //     bytes calldata hookData
+    // ) external override returns (bytes4);
 
     /**
      * @notice Get current risk metrics for a pool
      */
-    function getRiskMetrics(bytes32 poolId) external view returns (RiskMetrics memory);
+    function getRiskMetrics(PoolId poolId) external view returns (RiskMetrics memory);
 
     /**
      * @notice Get position risk data
      */
-    function getPositionRisk(address user, bytes32 poolId) external view returns (PositionRisk memory);
+    function getPositionRisk(address user, PoolId poolId) external view returns (PositionRisk memory);
 
     /**
      * @notice Get current risk parameters
      */
-    function getRiskParameters(bytes32 poolId) external view returns (RiskParameters memory);
+    function getRiskParameters(PoolId poolId) external view returns (RiskParameters memory);
 
     /**
      * @notice Update risk parameters for a pool
      */
-    function updateRiskParameters(bytes32 poolId, RiskParameters calldata newParams) external;
+    function updateRiskParameters(PoolId poolId, RiskParameters calldata newParams) external;
 
     /**
      * @notice Emergency shutdown of pool
      */
-    function emergencyShutdown(bytes32 poolId) external;
+    function emergencyShutdown(PoolId poolId) external;
 
     /**
      * @notice Resume pool operations after shutdown
      */
-    function resumeOperations(bytes32 poolId) external;
+    function resumeOperations(PoolId poolId) external;
 
     /**
      * @notice Get aggregate risk metrics for the system

@@ -1,29 +1,31 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/access/Ownable.sol";
+import {PoolKey} from "lib/v4-core/src/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
 import "../lib/PriceLib.sol";
 import "../lib/RiskMath.sol";
 import "./interfaces.sol";
-
 /**
  * @title VolatilityOracle
  * @notice Implements volatility calculations for pool risk analysis
  */
+
 contract VolatilityOracle is IVolatilityOracle, Ownable {
     // Storage for volatility data per pool
     mapping(bytes32 => VolatilityData) private volatilityData;
-    
+
     // Default window size for volatility calculation
     uint256 private constant DEFAULT_WINDOW_SIZE = 24; // 24 data points
-    
+
     // Minimum required data points for volatility calculation
     uint256 private constant MIN_DATA_POINTS = 2;
-    
+
     // Events
-    event WindowSizeUpdated(bytes32 indexed poolId, uint256 newSize);
-    event PriceDataAdded(bytes32 indexed poolId, int256 price, uint256 timestamp);
-    
+    event WindowSizeUpdated(PoolId indexed poolId, uint256 newSize);
+    event PriceDataAdded(PoolId indexed poolId, int256 price, uint256 timestamp);
+
     constructor() Ownable(msg.sender) {}
 
     /**
@@ -31,27 +33,19 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
      * @param poolId Pool identifier
      * @param windowSize Size of the rolling window for volatility calculation
      */
-    function initializePool(bytes32 poolId, uint256 windowSize) external onlyOwner {
+    function initializePool(PoolId poolId, uint256 windowSize) external onlyOwner {
         require(volatilityData[poolId].windowSize == 0, "Pool already initialized");
         require(windowSize >= MIN_DATA_POINTS, "Window size too small");
-        
-        volatilityData[poolId] = VolatilityData({
-            prices: new int256[](windowSize),
-            windowSize: windowSize,
-            currentIndex: 0
-        });
+
+        volatilityData[poolId] =
+            VolatilityData({prices: new int256[](windowSize), windowSize: windowSize, currentIndex: 0});
     }
 
     /**
      * @notice Get volatility data for a pool
      * @param poolId Pool identifier
      */
-    function getVolatilityData(bytes32 poolId) 
-        external 
-        view 
-        override 
-        returns (VolatilityData memory) 
-    {
+    function getVolatilityData(PoolId poolId) external view override returns (VolatilityData memory) {
         return volatilityData[poolId];
     }
 
@@ -60,11 +54,7 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
      * @param poolId Pool identifier
      * @param newPrice Latest price observation
      */
-    function calculateVolatility(bytes32 poolId, int256 newPrice)
-        external
-        override
-        returns (uint256)
-    {
+    function calculateVolatility(PoolId poolId, int256 newPrice) external override returns (uint256) {
         VolatilityData storage data = volatilityData[poolId];
         require(data.windowSize > 0, "Pool not initialized");
 
@@ -90,12 +80,12 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
 
         // Calculate mean of valid prices
         int256 mean = RiskMath.calculateMean(validPrices);
-        
+
         // Calculate volatility using standard deviation
         uint256 volatility = RiskMath.calculateVolatility(validPrices, mean);
 
         emit PriceDataAdded(poolId, newPrice, block.timestamp);
-        
+
         return volatility;
     }
 
@@ -104,11 +94,7 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
      * @param poolId Pool identifier
      * @param newWindowSize New window size
      */
-    function updateVolatilityWindow(bytes32 poolId, uint256 newWindowSize)
-        external
-        override
-        onlyOwner
-    {
+    function updateVolatilityWindow(PoolId poolId, uint256 newWindowSize) external override onlyOwner {
         require(newWindowSize >= MIN_DATA_POINTS, "Window size too small");
         VolatilityData storage data = volatilityData[poolId];
         require(data.windowSize > 0, "Pool not initialized");
@@ -137,10 +123,7 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
      * @param poolId Pool identifier
      * @param smoothingFactor Smoothing factor for EWMA calculation
      */
-    function calculateExponentialVolatility(
-        bytes32 poolId,
-        uint256 smoothingFactor
-    ) external view returns (uint256) {
+    function calculateExponentialVolatility(PoolId poolId, uint256 smoothingFactor) external view returns (uint256) {
         VolatilityData storage data = volatilityData[poolId];
         require(data.windowSize > 0, "Pool not initialized");
 
@@ -151,16 +134,9 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
         for (uint256 i = 0; i < data.windowSize; i++) {
             if (data.prices[i] != 0) {
                 if (lastPrice != 0) {
-                    uint256 priceChange = uint256(
-                        data.prices[i] > lastPrice ? 
-                        data.prices[i] - lastPrice : 
-                        lastPrice - data.prices[i]
-                    );
-                    ewmaVolatility = RiskMath.calculateEWMA(
-                        priceChange,
-                        ewmaVolatility,
-                        smoothingFactor
-                    );
+                    uint256 priceChange =
+                        uint256(data.prices[i] > lastPrice ? data.prices[i] - lastPrice : lastPrice - data.prices[i]);
+                    ewmaVolatility = RiskMath.calculateEWMA(priceChange, ewmaVolatility, smoothingFactor);
                     validPoints++;
                 }
                 lastPrice = data.prices[i];
@@ -175,7 +151,7 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
      * @notice Clear volatility data for a pool
      * @param poolId Pool identifier
      */
-    function clearVolatilityData(bytes32 poolId) external onlyOwner {
+    function clearVolatilityData(PoolId poolId) external onlyOwner {
         delete volatilityData[poolId];
     }
 }
