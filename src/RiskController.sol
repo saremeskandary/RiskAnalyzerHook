@@ -32,7 +32,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     }
 
     // Mapping of pool ID to control status
-    mapping(bytes32 => ControlStatus) public poolStatus;
+    mapping(PoolId => ControlStatus) public poolStatus;
 
     // Cooldown periods for different actions (in seconds)
     uint256 public constant WARNING_COOLDOWN = 1 hours;
@@ -78,7 +78,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
      * @param key Pool identifier
      * @param actionType Type of action to execute
      */
-    function executeAction(PoolKey key, ActionType actionType)
+    function executeAction(PoolKey calldata key, ActionType actionType)
         external
         override
         onlyOwner
@@ -93,7 +93,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
         _checkCooldown(status, actionType);
 
         // Execute action based on type
-        bool success = _executeSpecificAction(key.toId(), actionType);
+        bool success = _executeSpecificAction(key, actionType);
         if (!success) revert ActionFailed();
 
         // Update status
@@ -103,7 +103,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
 
         // Check if throttling should be activated
         if (status.actionCount >= MAX_ACTIONS_BEFORE_THROTTLE) {
-            _activateThrottle(key.toId());
+            _activateThrottle(key);
         }
 
         emit ActionExecuted(key.toId(), actionType, block.timestamp);
@@ -112,31 +112,31 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
 
     /**
      * @notice Get current control status
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      */
-    function getControlStatus(PoolId poolId)
+    function getControlStatus(PoolKey calldata key)
         external
         view
         override
         returns (bool isPaused, bool isThrottled, uint256 lastActionTimestamp)
     {
-        ControlStatus storage status = poolStatus[poolId];
+        ControlStatus storage status = poolStatus[key.toId()];
         return (status.isPaused, status.isThrottled, status.lastActionTimestamp);
     }
 
     /**
      * @notice Reset control status
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      */
-    function resetControls(PoolId poolId) external override onlyOwner {
-        ControlStatus storage status = poolStatus[poolId];
+    function resetControls(PoolKey calldata key) external override onlyOwner {
+        ControlStatus storage status = poolStatus[key.toId()];
 
         status.isPaused = false;
         status.isThrottled = false;
         status.actionCount = 0;
         status.throttleEndTime = 0;
 
-        emit ControlsReset(poolId, block.timestamp);
+        emit ControlsReset(key.toId(), block.timestamp);
     }
 
     /**
@@ -163,17 +163,17 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Execute specific action type
      */
-    function _executeSpecificAction(PoolId poolId, ActionType actionType) internal returns (bool) {
-        ControlStatus storage status = poolStatus[poolId];
+    function _executeSpecificAction(PoolKey calldata key, ActionType actionType) internal returns (bool) {
+        ControlStatus storage status = poolStatus[key.toId()];
 
         if (actionType == ActionType.WARNING) {
-            return _executeWarning(poolId);
+            return _executeWarning(key);
         } else if (actionType == ActionType.THROTTLE) {
-            return _executeThrottle(poolId);
+            return _executeThrottle(key);
         } else if (actionType == ActionType.PAUSE) {
-            return _executePause(poolId);
+            return _executePause(key);
         } else if (actionType == ActionType.EMERGENCY) {
-            return _executeEmergency(poolId);
+            return _executeEmergency(key);
         }
 
         return false;
@@ -182,7 +182,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Execute warning action
      */
-    function _executeWarning(PoolId poolId) internal returns (bool) {
+    function _executeWarning(PoolKey calldata key) internal returns (bool) {
         string memory message = "Risk level elevated - Warning issued";
         notifier.notifyUser(msg.sender, 1, message);
         return true;
@@ -191,23 +191,23 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Execute throttle action
      */
-    function _executeThrottle(PoolId poolId) internal returns (bool) {
-        ControlStatus storage status = poolStatus[poolId];
+    function _executeThrottle(PoolKey calldata key) internal returns (bool) {
+        ControlStatus storage status = poolStatus[key.toId()];
         if (status.isThrottled) revert AlreadyInState();
 
-        _activateThrottle(poolId);
+        _activateThrottle(key);
         return true;
     }
 
     /**
      * @notice Execute pause action
      */
-    function _executePause(PoolId poolId) internal returns (bool) {
-        ControlStatus storage status = poolStatus[poolId];
+    function _executePause(PoolKey calldata key) internal returns (bool) {
+        ControlStatus storage status = poolStatus[key.toId()];
         if (status.isPaused) revert AlreadyInState();
 
         status.isPaused = true;
-        registry.deactivatePool(poolId);
+        registry.deactivatePool(key);
 
         string memory message = "Pool operations paused due to high risk";
         notifier.notifyUser(msg.sender, 3, message);
@@ -218,29 +218,29 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Execute emergency action
      */
-    function _executeEmergency(PoolId poolId) internal returns (bool) {
-        ControlStatus storage status = poolStatus[poolId];
+    function _executeEmergency(PoolKey calldata key) internal returns (bool) {
+        ControlStatus storage status = poolStatus[key.toId()];
 
         status.isPaused = true;
-        registry.deactivatePool(poolId);
+        registry.deactivatePool(key);
 
         string memory message = "EMERGENCY: Critical risk level detected - Pool frozen";
         notifier.notifyUser(msg.sender, 4, message);
 
-        emit EmergencyAction(poolId, message);
+        emit EmergencyAction(key.toId(), message);
         return true;
     }
 
     /**
      * @notice Activate throttling for a pool
      */
-    function _activateThrottle(PoolId poolId) internal {
-        ControlStatus storage status = poolStatus[poolId];
+    function _activateThrottle(PoolKey calldata key) internal {
+        ControlStatus storage status = poolStatus[key.toId()];
 
         status.isThrottled = true;
         status.throttleEndTime = block.timestamp + THROTTLE_DURATION;
 
-        emit ThrottleActivated(poolId, status.throttleEndTime);
+        emit ThrottleActivated(key.toId(), status.throttleEndTime);
     }
 
     /**
@@ -260,20 +260,20 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Check if pool is currently throttled
      */
-    function isPoolThrottled(PoolId poolId) external view returns (bool) {
-        ControlStatus storage status = poolStatus[poolId];
+    function isPoolThrottled(PoolKey calldata key) external view returns (bool) {
+        ControlStatus storage status = poolStatus[key.toId()];
         return status.isThrottled && block.timestamp < status.throttleEndTime;
     }
 
     /**
      * @notice Get detailed control metrics
      */
-    function getControlMetrics(PoolId poolId)
+    function getControlMetrics(PoolKey calldata key)
         external
         view
         returns (uint256 actionCount, uint256 throttleEndTime, ActionType lastAction, bool isPaused, bool isThrottled)
     {
-        ControlStatus storage status = poolStatus[poolId];
+        ControlStatus storage status = poolStatus[key.toId()];
         return (status.actionCount, status.throttleEndTime, status.lastAction, status.isPaused, status.isThrottled);
     }
 }

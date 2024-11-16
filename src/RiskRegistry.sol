@@ -17,13 +17,13 @@ import {PoolKey} from "lib/v4-core/src/types/PoolKey.sol";
 contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
     using PoolIdLibrary for PoolKey;
     // Mapping of pool ID to risk parameters
-    mapping(bytes32 => RiskParameters) public poolParameters;
+    mapping(PoolId => RiskParameters) public poolParameters;
 
     // Mapping of pool ID to authorized managers
-    mapping(bytes32 => mapping(address => bool)) public poolManagers;
+    mapping(PoolId => mapping(address => bool)) public poolManagers;
 
     // List of registered pools
-    bytes32[] public registeredPools;
+    PoolId[] public registeredPools;
 
     // Errors
     error PoolAlreadyRegistered();
@@ -42,7 +42,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Modifier to check if caller is authorized manager
      */
-    modifier onlyPoolManager(PoolKey key) {
+    modifier onlyPoolManager(PoolKey calldata key) {
         if (!poolManagers[key.toId()][msg.sender] && msg.sender != owner()) {
             revert UnauthorizedManager();
         }
@@ -51,93 +51,93 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
 
     /**
      * @notice Register new pool for risk monitoring
-     * @param poolId Unique identifier for the pool
+     * @param key Unique identifier for the pool
      * @param params Initial risk parameters
      */
-    function registerPool(PoolId poolId, RiskParameters memory params) external override onlyOwner {
-        if (poolParameters[poolId].isActive) revert PoolAlreadyRegistered();
+    function registerPool(PoolKey calldata key, RiskParameters memory params) external override onlyOwner {
+        if (poolParameters[key.toId()].isActive) revert PoolAlreadyRegistered();
         if (params.volatilityThreshold == 0 || params.liquidityThreshold == 0) {
             revert InvalidParameters();
         }
 
-        poolParameters[poolId] = params;
-        poolParameters[poolId].isActive = true;
-        registeredPools.push(poolId);
+        poolParameters[key.toId()] = params;
+        poolParameters[key.toId()].isActive = true;
+        registeredPools.push(key.toId());
 
-        emit PoolRegistered(poolId, msg.sender);
-        emit RiskParametersUpdated(poolId, params);
+        emit PoolRegistered(key.toId(), msg.sender);
+        emit RiskParametersUpdated(key.toId(), params);
     }
 
     /**
      * @notice Update risk parameters for pool
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      * @param newParams Updated risk parameters
      */
-    function updatePoolParameters(PoolId poolId, RiskParameters memory newParams)
+    function updatePoolParameters(PoolKey calldata key, RiskParameters memory newParams)
         external
         override
-        onlyPoolManager(poolId)
+        onlyPoolManager(key)
         whenNotPaused
     {
-        if (!poolParameters[poolId].isActive) revert PoolInactive();
+        if (!poolParameters[key.toId()].isActive) revert PoolInactive();
         if (newParams.volatilityThreshold == 0 || newParams.liquidityThreshold == 0) {
             revert InvalidParameters();
         }
 
-        poolParameters[poolId] = newParams;
-        poolParameters[poolId].isActive = true;
+        poolParameters[key.toId()] = newParams;
+        poolParameters[key.toId()].isActive = true;
 
-        emit RiskParametersUpdated(poolId, newParams);
+        emit RiskParametersUpdated(key.toId(), newParams);
     }
 
     /**
      * @notice Get risk parameters for pool
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      */
-    function getPoolParameters(PoolId poolId) external view override returns (RiskParameters memory) {
-        if (!poolParameters[poolId].isActive) revert PoolInactive();
-        return poolParameters[poolId];
+    function getPoolParameters(PoolKey calldata key) external view override returns (RiskParameters memory) {
+        if (!poolParameters[key.toId()].isActive) revert PoolInactive();
+        return poolParameters[key.toId()];
     }
 
     /**
      * @notice Deactivate pool monitoring
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      */
-    function deactivatePool(PoolId poolId) external override onlyOwner {
-        if (!poolParameters[poolId].isActive) revert PoolInactive();
-        poolParameters[poolId].isActive = false;
+    function deactivatePool(PoolKey calldata key) external override onlyOwner {
+        if (!poolParameters[key.toId()].isActive) revert PoolInactive();
+        poolParameters[key.toId()].isActive = false;
     }
 
     /**
      * @notice Activate pool monitoring
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      */
-    function activatePool(PoolId poolId) external override onlyOwner {
-        if (poolParameters[poolId].volatilityThreshold == 0) revert PoolNotRegistered();
-        poolParameters[poolId].isActive = true;
+    function activatePool(PoolKey calldata key) external override onlyOwner {
+        if (poolParameters[key.toId()].volatilityThreshold == 0) revert PoolNotRegistered();
+        poolParameters[key.toId()].isActive = true;
     }
 
     /**
      * @notice Add authorized manager for pool
      */
-    function addPoolManager(PoolId poolId, address manager) external onlyOwner whenNotPaused {
-        if (!poolParameters[poolId].isActive) revert PoolInactive();
-        poolManagers[poolId][manager] = true;
-        emit ManagerAdded(poolId, manager);
+    function addPoolManager(PoolKey calldata key, address manager) external onlyOwner whenNotPaused {
+        if (!poolParameters[key.toId()].isActive) revert PoolInactive();
+        poolManagers[key.toId()][manager] = true;
+        emit ManagerAdded(key.toId(), manager);
     }
 
     /**
      * @notice Remove authorized manager for pool
      */
-    function removePoolManager(PoolId poolId, address manager) external onlyOwner {
-        poolManagers[poolId][manager] = false;
-        emit ManagerRemoved(poolId, manager);
+    function removePoolManager(PoolKey calldata key, address manager) external onlyOwner {
+        poolManagers[key.toId()][manager] = false;
+        emit ManagerRemoved(key.toId(), manager);
     }
 
     /**
      * @notice Get all registered pools
      */
-    function getAllPools() external view returns (bytes32[] memory) {
+    function getAllPools() external view returns (PoolId[] memory registeredPools) {
         return registeredPools;
     }
 
@@ -162,18 +162,18 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
 
     /**
      * @notice Check if a pool is registered
-     * @param poolId The pool ID to check
+     * @param key The pool ID to check
      * @return isRegistered True if the pool is registered
      */
-    function isPoolRegistered(PoolId poolId) external view returns (bool isRegistered) {
-        return poolParameters[poolId].isActive;
+    function isPoolRegistered(PoolKey calldata key) external view returns (bool isRegistered) {
+        return poolParameters[key.toId()].isActive;
     }
 
     /**
      * @notice Check if address is authorized manager
      */
-    function isPoolManager(PoolId poolId, address manager) external view returns (bool) {
-        return poolManagers[poolId][manager];
+    function isPoolManager(PoolKey calldata key, address manager) external view returns (bool) {
+        return poolManagers[key.toId()][manager];
     }
 
     /**
@@ -194,23 +194,23 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
      * @notice Batch update risk parameters
      * @dev Allows updating multiple pools in a single transaction
      */
-    function batchUpdateParameters(bytes32[] calldata poolIds, RiskParameters[] calldata newParams)
+    function batchUpdateParameters(PoolKey[] calldata keys, RiskParameters[] calldata newParams)
         external
         onlyOwner
         whenNotPaused
     {
-        if (poolIds.length != newParams.length) revert InvalidParameters();
+        if (keys.length != newParams.length) revert InvalidParameters();
 
-        for (uint256 i = 0; i < poolIds.length; i++) {
-            if (poolParameters[poolIds[i]].isActive) {
+        for (uint256 i = 0; i < keys.toId().length; i++) {
+            if (poolParameters[keys.toId()[i]].isActive) {
                 if (newParams[i].volatilityThreshold == 0 || newParams[i].liquidityThreshold == 0) {
                     continue;
                 }
 
-                poolParameters[poolIds[i]] = newParams[i];
-                poolParameters[poolIds[i]].isActive = true;
+                poolParameters[keys.toId()[i]] = newParams[i];
+                poolParameters[keys.toId()[i]].isActive = true;
 
-                emit RiskParametersUpdated(poolIds[i], newParams[i]);
+                emit RiskParametersUpdated(keys.toId()[i], newParams[i]);
             }
         }
     }

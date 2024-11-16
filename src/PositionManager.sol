@@ -58,7 +58,7 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
         int256 currentPrice,
         address token0,
         address token1,
-        PoolId poolId,
+        PoolKey calldata key,
         int24 tickLower,
         int24 tickUpper
     ) external override whenNotPaused returns (uint256) {
@@ -71,7 +71,7 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
 
         uint256 distributionScore = calculateDistributionScore(totalLiquidity, currentPrice, tickLower, tickUpper);
 
-        uint256 stabilityScore = calculateStabilityScore(poolId, totalLiquidity);
+        uint256 stabilityScore = calculateStabilityScore(key, totalLiquidity);
 
         // Calculate weighted average
         uint256 totalScore = (
@@ -80,9 +80,9 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
         ) / 100;
 
         // Update history
-        updateLiquidityHistory(poolId, totalLiquidity);
+        updateLiquidityHistory(key, totalLiquidity);
 
-        emit LiquidityScoreCalculated(poolId, totalScore, block.timestamp);
+        emit LiquidityScoreCalculated(key.toId(), totalScore, block.timestamp);
 
         return totalScore;
     }
@@ -146,8 +146,8 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
     /**
      * @notice Calculate stability score based on historical data
      */
-    function calculateStabilityScore(PoolId poolId, uint256 currentLiquidity) public view override returns (uint256) {
-        LiquidityHistory storage history = liquidityHistory[poolId];
+    function calculateStabilityScore(PoolKey calldata key, uint256 currentLiquidity) public view override returns (uint256) {
+        LiquidityHistory storage history = liquidityHistory[key.toId()];
 
         if (history.liquidityValues.length < 2) {
             return BASIS_POINTS; // Not enough history
@@ -197,8 +197,8 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
     /**
      * @notice Update liquidity history
      */
-    function updateLiquidityHistory(PoolId poolId, uint256 newLiquidity) internal {
-        LiquidityHistory storage history = liquidityHistory[poolId];
+    function updateLiquidityHistory(PoolKey calldata key, uint256 newLiquidity) internal {
+        LiquidityHistory storage history = liquidityHistory[key.toId()];
 
         if (history.liquidityValues.length == 0) {
             history.liquidityValues = new uint256[](HISTORY_WINDOW);
@@ -217,12 +217,12 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
     /**
      * @notice Get liquidity history for a pool
      */
-    function getLiquidityHistory(PoolId poolId)
+    function getLiquidityHistory(PoolKey calldata key)
         external
         view
         returns (uint256[] memory values, uint256[] memory timestamps)
     {
-        LiquidityHistory storage history = liquidityHistory[poolId];
+        LiquidityHistory storage history = liquidityHistory[key.toId()];
         return (history.liquidityValues, history.timestamps);
     }
 

@@ -16,7 +16,7 @@ import {PoolKey} from "lib/v4-core/src/types/PoolKey.sol";
 contract VolatilityOracle is IVolatilityOracle, Ownable {
     using PoolIdLibrary for PoolKey;
     // Storage for volatility data per pool
-    mapping(bytes32 => VolatilityData) private volatilityData;
+    mapping(PoolId => VolatilityData) private volatilityData;
 
     // Default window size for volatility calculation
     uint256 private constant DEFAULT_WINDOW_SIZE = 24; // 24 data points
@@ -32,32 +32,32 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
 
     /**
      * @notice Initialize volatility tracking for a new pool
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      * @param windowSize Size of the rolling window for volatility calculation
      */
-    function initializePool(PoolId poolId, uint256 windowSize) external onlyOwner {
-        require(volatilityData[poolId].windowSize == 0, "Pool already initialized");
+    function initializePool(PoolKey calldata key, uint256 windowSize) external onlyOwner {
+        require(volatilityData[key.toId()].windowSize == 0, "Pool already initialized");
         require(windowSize >= MIN_DATA_POINTS, "Window size too small");
 
-        volatilityData[poolId] =
+        volatilityData[key.toId()] =
             VolatilityData({prices: new int256[](windowSize), windowSize: windowSize, currentIndex: 0});
     }
 
     /**
      * @notice Get volatility data for a pool
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      */
-    function getVolatilityData(PoolId poolId) external view override returns (VolatilityData memory) {
-        return volatilityData[poolId];
+    function getVolatilityData(PoolKey calldata key) external view override returns (VolatilityData memory) {
+        return volatilityData[key.toId()];
     }
 
     /**
      * @notice Calculate volatility based on new price data
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      * @param newPrice Latest price observation
      */
-    function calculateVolatility(PoolId poolId, int256 newPrice) external override returns (uint256) {
-        VolatilityData storage data = volatilityData[poolId];
+    function calculateVolatility(PoolKey calldata key, int256 newPrice) external override returns (uint256) {
+        VolatilityData storage data = volatilityData[key.toId()];
         require(data.windowSize > 0, "Pool not initialized");
 
         // Update price array
@@ -86,19 +86,19 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
         // Calculate volatility using standard deviation
         uint256 volatility = RiskMath.calculateVolatility(validPrices, mean);
 
-        emit PriceDataAdded(poolId, newPrice, block.timestamp);
+        emit PriceDataAdded(key.toId(), newPrice, block.timestamp);
 
         return volatility;
     }
 
     /**
      * @notice Update volatility window size
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      * @param newWindowSize New window size
      */
-    function updateVolatilityWindow(PoolId poolId, uint256 newWindowSize) external override onlyOwner {
+    function updateVolatilityWindow(PoolKey calldata key, uint256 newWindowSize) external override onlyOwner {
         require(newWindowSize >= MIN_DATA_POINTS, "Window size too small");
-        VolatilityData storage data = volatilityData[poolId];
+        VolatilityData storage data = volatilityData[key.toId()];
         require(data.windowSize > 0, "Pool not initialized");
 
         // Create new price array with new size
@@ -117,16 +117,16 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
         data.windowSize = newWindowSize;
         data.currentIndex = copySize % newWindowSize;
 
-        emit WindowSizeUpdated(poolId, newWindowSize);
+        emit WindowSizeUpdated(key.toId(), newWindowSize);
     }
 
     /**
      * @notice Calculate exponential volatility (EWMA-based)
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      * @param smoothingFactor Smoothing factor for EWMA calculation
      */
-    function calculateExponentialVolatility(PoolId poolId, uint256 smoothingFactor) external view returns (uint256) {
-        VolatilityData storage data = volatilityData[poolId];
+    function calculateExponentialVolatility(PoolKey calldata key, uint256 smoothingFactor) external view returns (uint256) {
+        VolatilityData storage data = volatilityData[key.toId()];
         require(data.windowSize > 0, "Pool not initialized");
 
         uint256 validPoints;
@@ -151,9 +151,9 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
 
     /**
      * @notice Clear volatility data for a pool
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      */
-    function clearVolatilityData(PoolId poolId) external onlyOwner {
-        delete volatilityData[poolId];
+    function clearVolatilityData(PoolKey calldata key) external onlyOwner {
+        delete volatilityData[key.toId()];
     }
 }

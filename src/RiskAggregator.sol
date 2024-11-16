@@ -87,10 +87,10 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
      * @notice Aggregate risk metrics for a pool
      * @param key Pool identifier
      */
-    function aggregatePoolRisk(PoolKey key) external override whenNotPaused returns (uint256 totalRiskScore) {
+    function aggregatePoolRisk(PoolKey calldata key) external whenNotPaused returns (uint256 totalRiskScore) {
         if (key.toId() == bytes32(0)) revert InvalidPoolId();
 
-        RiskCache storage cache = poolRiskCache[key];
+        RiskCache storage cache = poolRiskCache[key.toId()];
 
         // Return cached value if fresh
         if (block.timestamp - cache.lastUpdate <= CACHE_DURATION) {
@@ -98,16 +98,16 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
         }
 
         // Get volatility metrics
-        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key.toId());
+        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key);
 
         // Calculate volatility score
         uint256 volatilityScore = _calculateVolatilityScore(volData);
 
         // Get liquidity metrics and score
-        uint256 liquidityScore = _calculateLiquidityScore(key.toId());
+        uint256 liquidityScore = _calculateLiquidityScore(key);
 
         // Get position risk metrics
-        uint256 positionScore = _calculatePositionScore(key.toId());
+        uint256 positionScore = _calculatePositionScore(key);
 
         // Calculate weighted risk score
         uint256[] memory scores = new uint256[](3);
@@ -212,13 +212,13 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
     /**
      * @notice Calculate liquidity score
      */
-    function _calculateLiquidityScore(PoolId poolId) internal view returns (uint256) {
-        IRiskRegistry.RiskParameters memory params = riskRegistry.getPoolParameters(poolId);
+    function _calculateLiquidityScore(PoolKey calldata key) internal view returns (uint256) {
+        IRiskRegistry.RiskParameters memory params = riskRegistry.getPoolParameters(key);
 
         uint256 liquidityThreshold = params.liquidityThreshold;
         if (liquidityThreshold == 0) return MAX_RISK_SCORE;
 
-        uint256 currentLiquidity = liquidityScoring.calculateStabilityScore(poolId, liquidityThreshold);
+        uint256 currentLiquidity = liquidityScoring.calculateStabilityScore(key, liquidityThreshold);
 
         return currentLiquidity >= liquidityThreshold
             ? 0
@@ -228,8 +228,8 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
     /**
      * @notice Calculate position score
      */
-    function _calculatePositionScore(PoolId poolId) internal view returns (uint256) {
-        IPositionManager.PositionData memory position = positionManager.getPositionData(address(this), poolId);
+    function _calculatePositionScore(PoolKey calldata key) internal view returns (uint256) {
+        IPositionManager.PositionData memory position = positionManager.getPositionData(address(this), key);
 
         return position.riskScore;
     }
@@ -258,8 +258,8 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
     /**
      * @notice Force cache refresh for pool
      */
-    function refreshPoolCache(PoolId poolId) external onlyOwner {
-        delete poolRiskCache[poolId];
+    function refreshPoolCache(PoolKey calldata key) external onlyOwner {
+        delete poolRiskCache[key.toId()];
     }
 
     /**
@@ -294,15 +294,15 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
     /**
      * @notice Get raw risk components for pool
      */
-    function getRiskComponents(PoolId poolId)
+    function getRiskComponents(PoolKey calldata key)
         external
         view
         returns (uint256 volatilityRisk, uint256 liquidityRisk, uint256 positionRisk)
     {
-        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(poolId);
+        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key);
 
         volatilityRisk = _calculateVolatilityScore(volData);
-        liquidityRisk = _calculateLiquidityScore(poolId);
-        positionRisk = _calculatePositionScore(poolId);
+        liquidityRisk = _calculateLiquidityScore(key);
+        positionRisk = _calculatePositionScore(key);
     }
 }
