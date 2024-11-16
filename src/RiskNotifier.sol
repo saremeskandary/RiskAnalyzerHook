@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {Ownable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import {Pausable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
 import "./interfaces.sol";
+import {PoolKey} from "lib/v4-core/src/types/PoolKey.sol";
 
 /**
  * @title RiskNotifier
@@ -11,6 +12,7 @@ import "./interfaces.sol";
  * @dev Implements IRiskNotifier interface
  */
 contract RiskNotifier is IRiskNotifier, Ownable, Pausable {
+    using PoolIdLibrary for PoolKey;
     // Maximum number of notifications per user
     uint256 public constant MAX_NOTIFICATIONS = 100;
 

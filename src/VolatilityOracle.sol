@@ -7,12 +7,14 @@ import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
 import "../lib/PriceLib.sol";
 import "../lib/RiskMath.sol";
 import "./interfaces.sol";
+import {PoolKey} from "lib/v4-core/src/types/PoolKey.sol";
 /**
  * @title VolatilityOracle
  * @notice Implements volatility calculations for pool risk analysis
  */
 
 contract VolatilityOracle is IVolatilityOracle, Ownable {
+    using PoolIdLibrary for PoolKey;
     // Storage for volatility data per pool
     mapping(bytes32 => VolatilityData) private volatilityData;
 

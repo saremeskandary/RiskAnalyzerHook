@@ -7,6 +7,7 @@ import {ReentrancyGuard} from
 import {Pausable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
 import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
 import "./interfaces.sol";
+import {PoolKey} from "lib/v4-core/src/types/PoolKey.sol";
 
 /**
  * @title RiskRegistry
@@ -14,6 +15,7 @@ import "./interfaces.sol";
  * @dev Implements IRiskRegistry interface
  */
 contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
+    using PoolIdLibrary for PoolKey;
     // Mapping of pool ID to risk parameters
     mapping(bytes32 => RiskParameters) public poolParameters;
 
@@ -40,8 +42,8 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
     /**
      * @notice Modifier to check if caller is authorized manager
      */
-    modifier onlyPoolManager(PoolId poolId) {
-        if (!poolManagers[poolId][msg.sender] && msg.sender != owner()) {
+    modifier onlyPoolManager(PoolKey key) {
+        if (!poolManagers[key.toId()][msg.sender] && msg.sender != owner()) {
             revert UnauthorizedManager();
         }
         _;

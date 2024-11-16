@@ -7,6 +7,7 @@ import {ReentrancyGuard} from
 import {Pausable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
 import "./interfaces.sol";
 import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
+import {PoolKey} from "lib/v4-core/src/types/PoolKey.sol";
 
 /**
  * @title RiskController
@@ -14,6 +15,7 @@ import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
  * @dev Implements IRiskController interface
  */
 contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
+    using PoolIdLibrary for PoolKey;
     // Component interfaces
     IRiskRegistry public immutable registry;
     IRiskNotifier public immutable notifier;
@@ -73,25 +75,25 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
 
     /**
      * @notice Execute risk control action
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      * @param actionType Type of action to execute
      */
-    function executeAction(PoolId poolId, ActionType actionType)
+    function executeAction(PoolKey key, ActionType actionType)
         external
         override
         onlyOwner
         whenNotPaused
         returns (bool)
     {
-        if (poolId == bytes32(0)) revert InvalidPoolId();
+        if (key.toId() == bytes32(0)) revert InvalidPoolId();
 
-        ControlStatus storage status = poolStatus[poolId];
+        ControlStatus storage status = poolStatus[key.toId()];
 
         // Check cooldown periods
         _checkCooldown(status, actionType);
 
         // Execute action based on type
-        bool success = _executeSpecificAction(poolId, actionType);
+        bool success = _executeSpecificAction(key.toId(), actionType);
         if (!success) revert ActionFailed();
 
         // Update status
@@ -101,10 +103,10 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
 
         // Check if throttling should be activated
         if (status.actionCount >= MAX_ACTIONS_BEFORE_THROTTLE) {
-            _activateThrottle(poolId);
+            _activateThrottle(key.toId());
         }
 
-        emit ActionExecuted(poolId, actionType, block.timestamp);
+        emit ActionExecuted(key.toId(), actionType, block.timestamp);
         return true;
     }
 

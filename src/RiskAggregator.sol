@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {Ownable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import {Pausable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
 import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
+import {PoolKey} from "lib/v4-core/src/types/PoolKey.sol";
 import "../lib/RiskMath.sol";
 import "./interfaces.sol";
 
@@ -13,6 +14,8 @@ import "./interfaces.sol";
  * @dev Implements IRiskAggregator interface
  */
 contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
+    using PoolIdLibrary for PoolKey;
+
     // Component interfaces
     IVolatilityOracle public immutable volatilityOracle;
     ILiquidityScoring public immutable liquidityScoring;
@@ -82,12 +85,12 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
 
     /**
      * @notice Aggregate risk metrics for a pool
-     * @param poolId Pool identifier
+     * @param key Pool identifier
      */
-    function aggregatePoolRisk(PoolId poolId) external override whenNotPaused returns (uint256 totalRiskScore) {
-        if (poolId == bytes32(0)) revert InvalidPoolId();
+    function aggregatePoolRisk(PoolKey key) external override whenNotPaused returns (uint256 totalRiskScore) {
+        if (key.toId() == bytes32(0)) revert InvalidPoolId();
 
-        RiskCache storage cache = poolRiskCache[poolId];
+        RiskCache storage cache = poolRiskCache[key];
 
         // Return cached value if fresh
         if (block.timestamp - cache.lastUpdate <= CACHE_DURATION) {
@@ -95,16 +98,16 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
         }
 
         // Get volatility metrics
-        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(poolId);
+        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key.toId());
 
         // Calculate volatility score
         uint256 volatilityScore = _calculateVolatilityScore(volData);
 
         // Get liquidity metrics and score
-        uint256 liquidityScore = _calculateLiquidityScore(poolId);
+        uint256 liquidityScore = _calculateLiquidityScore(key.toId());
 
         // Get position risk metrics
-        uint256 positionScore = _calculatePositionScore(poolId);
+        uint256 positionScore = _calculatePositionScore(key.toId());
 
         // Calculate weighted risk score
         uint256[] memory scores = new uint256[](3);
@@ -127,7 +130,7 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
         // Update system metrics
         _updateSystemMetrics(totalRiskScore);
 
-        emit RiskScoreUpdated(poolId, totalRiskScore, block.timestamp);
+        emit RiskScoreUpdated(key.toId(), totalRiskScore, block.timestamp);
 
         return totalRiskScore;
     }
