@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "./interfaces.sol";
 
 /**
@@ -13,28 +13,28 @@ import "./interfaces.sol";
 contract RiskNotifier is IRiskNotifier, Ownable, Pausable {
     // Maximum number of notifications per user
     uint256 public constant MAX_NOTIFICATIONS = 100;
-    
+
     // Notification storage per user
     mapping(address => Notification[]) private userNotifications;
-    
+
     // Count of notifications per user
     mapping(address => uint256) private notificationCount;
-    
+
     // Authorized notifiers (other contracts that can send notifications)
     mapping(address => bool) public authorizedNotifiers;
-    
+
     // Risk level thresholds
     uint256 public constant RISK_LEVEL_LOW = 1;
     uint256 public constant RISK_LEVEL_MEDIUM = 2;
     uint256 public constant RISK_LEVEL_HIGH = 3;
     uint256 public constant RISK_LEVEL_CRITICAL = 4;
-    
+
     // Events
     event NotifierAdded(address indexed notifier);
     event NotifierRemoved(address indexed notifier);
     event NotificationCleared(address indexed user);
     event NotificationsExpired(address indexed user, uint256 count);
-    
+
     // Errors
     error UnauthorizedNotifier();
     error InvalidAddress();
@@ -61,12 +61,7 @@ contract RiskNotifier is IRiskNotifier, Ownable, Pausable {
      * @notice Get notifications for a user
      * @param user Address of the user
      */
-    function getUserNotifications(address user)
-        external
-        view
-        override
-        returns (Notification[] memory)
-    {
+    function getUserNotifications(address user) external view override returns (Notification[] memory) {
         if (user == address(0)) revert InvalidAddress();
         return userNotifications[user];
     }
@@ -77,25 +72,24 @@ contract RiskNotifier is IRiskNotifier, Ownable, Pausable {
      * @param riskLevel Level of risk (1-4)
      * @param message Notification message
      */
-    function notifyUser(
-        address user,
-        uint256 riskLevel,
-        string memory message
-    ) external override onlyAuthorizedNotifier whenNotPaused {
+    function notifyUser(address user, uint256 riskLevel, string memory message)
+        external
+        override
+        onlyAuthorizedNotifier
+        whenNotPaused
+    {
         if (user == address(0)) revert InvalidAddress();
-        if (riskLevel < RISK_LEVEL_LOW || riskLevel > RISK_LEVEL_CRITICAL) 
+        if (riskLevel < RISK_LEVEL_LOW || riskLevel > RISK_LEVEL_CRITICAL) {
             revert InvalidRiskLevel();
+        }
         if (bytes(message).length == 0) revert EmptyMessage();
-        if (notificationCount[user] >= MAX_NOTIFICATIONS) 
+        if (notificationCount[user] >= MAX_NOTIFICATIONS) {
             revert NotificationLimitExceeded();
+        }
 
         // Create new notification
-        Notification memory newNotification = Notification({
-            user: user,
-            riskLevel: riskLevel,
-            message: message,
-            timestamp: block.timestamp
-        });
+        Notification memory newNotification =
+            Notification({user: user, riskLevel: riskLevel, message: message, timestamp: block.timestamp});
 
         // Add to storage
         userNotifications[user].push(newNotification);
@@ -108,17 +102,13 @@ contract RiskNotifier is IRiskNotifier, Ownable, Pausable {
      * @notice Clear notifications for a user
      * @param user Address of the user
      */
-    function clearNotifications(address user) 
-        external 
-        override 
-        whenNotPaused 
-    {
+    function clearNotifications(address user) external override whenNotPaused {
         if (user == address(0)) revert InvalidAddress();
         if (notificationCount[user] == 0) revert NoNotifications();
-        
+
         delete userNotifications[user];
         notificationCount[user] = 0;
-        
+
         emit NotificationCleared(user);
     }
 
@@ -146,10 +136,7 @@ contract RiskNotifier is IRiskNotifier, Ownable, Pausable {
      * @param user Address of the user
      * @param maxAge Maximum age of notifications to keep (in seconds)
      */
-    function clearExpiredNotifications(
-        address user,
-        uint256 maxAge
-    ) external whenNotPaused {
+    function clearExpiredNotifications(address user, uint256 maxAge) external whenNotPaused {
         if (user == address(0)) revert InvalidAddress();
         if (notificationCount[user] == 0) revert NoNotifications();
 
@@ -171,13 +158,13 @@ contract RiskNotifier is IRiskNotifier, Ownable, Pausable {
         // Resize array and update count
         uint256 newLength = writeIndex;
         uint256 removed = originalCount - newLength;
-        
+
         while (notifications.length > newLength) {
             notifications.pop();
         }
-        
+
         notificationCount[user] = newLength;
-        
+
         if (removed > 0) {
             emit NotificationsExpired(user, removed);
         }
@@ -187,11 +174,7 @@ contract RiskNotifier is IRiskNotifier, Ownable, Pausable {
      * @notice Get notification count for user
      * @param user Address of the user
      */
-    function getNotificationCount(address user) 
-        external 
-        view 
-        returns (uint256) 
-    {
+    function getNotificationCount(address user) external view returns (uint256) {
         return notificationCount[user];
     }
 
@@ -199,11 +182,7 @@ contract RiskNotifier is IRiskNotifier, Ownable, Pausable {
      * @notice Check if address is authorized notifier
      * @param notifier Address to check
      */
-    function isAuthorizedNotifier(address notifier) 
-        external 
-        view 
-        returns (bool) 
-    {
+    function isAuthorizedNotifier(address notifier) external view returns (bool) {
         return authorizedNotifiers[notifier];
     }
 
@@ -227,28 +206,25 @@ contract RiskNotifier is IRiskNotifier, Ownable, Pausable {
      * @param riskLevel Risk level for all notifications
      * @param message Notification message
      */
-    function batchNotify(
-        address[] calldata users,
-        uint256 riskLevel,
-        string calldata message
-    ) external onlyAuthorizedNotifier whenNotPaused {
-        if (riskLevel < RISK_LEVEL_LOW || riskLevel > RISK_LEVEL_CRITICAL) 
+    function batchNotify(address[] calldata users, uint256 riskLevel, string calldata message)
+        external
+        onlyAuthorizedNotifier
+        whenNotPaused
+    {
+        if (riskLevel < RISK_LEVEL_LOW || riskLevel > RISK_LEVEL_CRITICAL) {
             revert InvalidRiskLevel();
+        }
         if (bytes(message).length == 0) revert EmptyMessage();
-        
+
         for (uint256 i = 0; i < users.length; i++) {
             address user = users[i];
             if (user != address(0) && notificationCount[user] < MAX_NOTIFICATIONS) {
-                Notification memory newNotification = Notification({
-                    user: user,
-                    riskLevel: riskLevel,
-                    message: message,
-                    timestamp: block.timestamp
-                });
-                
+                Notification memory newNotification =
+                    Notification({user: user, riskLevel: riskLevel, message: message, timestamp: block.timestamp});
+
                 userNotifications[user].push(newNotification);
                 notificationCount[user]++;
-                
+
                 emit RiskNotification(user, riskLevel, message);
             }
         }
