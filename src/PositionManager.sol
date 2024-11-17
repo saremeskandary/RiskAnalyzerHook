@@ -15,12 +15,12 @@ contract PositionManager is IPositionManager, Ownable, Pausable, ReentrancyGuard
     IRiskRegistry public immutable riskRegistry;
 
     // Position data storage
-    mapping(address => mapping(bytes32 => PositionData)) private positions;
+    mapping(address => mapping(PoolId => PositionData)) private positions;
 
     // Events
-    event PositionUpdated(address indexed user, bytes32 indexed poolId, uint256 size, uint256 riskScore);
-    event PositionClosed(address indexed user, bytes32 indexed poolId);
-    event RiskScoreUpdated(address indexed user, bytes32 indexed poolId, uint256 newScore);
+    event PositionUpdated(address indexed user, PoolId indexed poolId, uint256 size, uint256 riskScore);
+    event PositionClosed(address indexed user, PoolId indexed poolId);
+    event RiskScoreUpdated(address indexed user, PoolId indexed poolId, uint256 newScore);
 
     // Risk thresholds
     uint256 public constant MAX_RISK_SCORE = 10000; // 100%
@@ -43,11 +43,11 @@ contract PositionManager is IPositionManager, Ownable, Pausable, ReentrancyGuard
     /**
      * @notice Get position data for a user and pool
      * @param user Address of the position owner
-     * @param poolId Unique identifier of the pool
+     * @param key Unique identifier of the pool
      * @return Position data including size, ticks, and risk score
      */
-    function getPositionData(address user, bytes32 poolId) external view override returns (PositionData memory) {
-        PositionData memory position = positions[user][poolId];
+    function getPositionData(address user, PoolKey calldata key) external view override returns (PositionData memory) {
+        PositionData memory position = positions[user][key.toId()];
         if (position.size == 0) revert PositionNotFound();
         return position;
     }
@@ -58,9 +58,13 @@ contract PositionManager is IPositionManager, Ownable, Pausable, ReentrancyGuard
      * @param key Unique identifier of the pool
      * @param newRiskScore New risk score to assign
      */
-    function updatePositionRisk(address user, PoolKey calldata key, uint256 newRiskScore) external override whenNotPaused {
+    function updatePositionRisk(address user, PoolKey calldata key, uint256 newRiskScore)
+        external
+        override
+        whenNotPaused
+    {
         // Only authorized risk assessors can update risk scores
-        if (!riskRegistry.isPoolManager(key.toId(), msg.sender)) {
+        if (!riskRegistry.isPoolManager(key, msg.sender)) {
             revert UnauthorizedAccess();
         }
 
@@ -76,30 +80,30 @@ contract PositionManager is IPositionManager, Ownable, Pausable, ReentrancyGuard
 
         // If risk is too high, attempt to close the position
         if (newRiskScore >= HIGH_RISK_THRESHOLD) {
-            closeRiskyPosition(user, key.toId());
+            closeRiskyPosition(user, key);
         }
     }
 
     /**
      * @notice Close a position that has exceeded risk thresholds
      * @param user Address of the position owner
-     * @param poolId Unique identifier of the pool
+     * @param key Unique identifier of the pool
      * @return success Whether the position was successfully closed
      */
-    function closeRiskyPosition(address user, bytes32 poolId) public override whenNotPaused returns (bool) {
-        PositionData storage position = positions[user][poolId];
+    function closeRiskyPosition(address user, PoolKey calldata key) public override whenNotPaused returns (bool) {
+        PositionData storage position = positions[user][key.toId()];
 
         if (position.size == 0) revert PositionNotFound();
         if (position.riskScore < HIGH_RISK_THRESHOLD) revert RiskTooHigh();
 
         // Clear position data
-        delete positions[user][poolId];
+        delete positions[user][key.toId()];
 
-        emit PositionClosed(user, poolId);
+        emit PositionClosed(user, key.toId());
         return true;
     }
 
-    function updatePosition(address user, bytes32 poolId, uint256 size, int24 tickLower, int24 tickUpper)
+    function updatePosition(address user, PoolKey calldata key, uint256 size, int24 tickLower, int24 tickUpper)
         public
         whenNotPaused
         onlyOwner
@@ -108,7 +112,7 @@ contract PositionManager is IPositionManager, Ownable, Pausable, ReentrancyGuard
         require(size > 0, "Invalid position size");
         require(tickLower < tickUpper, "Invalid tick range");
 
-        positions[user][poolId] = PositionData({
+        positions[user][key.toId()] = PositionData({
             size: size,
             tickLower: tickLower,
             tickUpper: tickUpper,
@@ -116,12 +120,12 @@ contract PositionManager is IPositionManager, Ownable, Pausable, ReentrancyGuard
             lastUpdate: block.timestamp
         });
 
-        emit PositionUpdated(user, poolId, size, 0);
+        emit PositionUpdated(user, key.toId(), size, 0);
     }
 
     function batchUpdatePositions(
         address[] calldata users,
-        bytes32[] calldata poolIds,
+        PoolKey[] calldata poolIds,
         uint256[] calldata sizes,
         int24[] calldata tickLowers,
         int24[] calldata tickUppers

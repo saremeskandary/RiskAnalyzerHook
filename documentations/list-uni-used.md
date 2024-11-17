@@ -1,15 +1,6 @@
 I'll analyze where Uniswap V4 hooks are used in this codebase and explain their purpose:
 
-1. Counter.sol - Example Hook Implementation
-```solidity
-- beforeSwap: Increments counter before swaps
-- afterSwap: Increments counter after swaps 
-- beforeAddLiquidity: Increments counter before liquidity additions
-- beforeRemoveLiquidity: Increments counter before liquidity removals
-```
-This is a simple demonstration hook showing basic hook usage for tracking pool events.
-
-2. RiskAnalyzerHook.sol - Main Risk Analysis Hook
+1. RiskAnalyzerHook.sol - Main Risk Analysis Hook
 ```solidity
 - beforeSwap: 
   - Analyzes volatility risk before trades

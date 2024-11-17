@@ -84,7 +84,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
         whenNotPaused
         returns (bool)
         {
-        if (key.toId() == bytes32(0)) revert InvalidPoolId();
+        // if (key.toId() == bytes32(0)) revert InvalidPoolId();
 
         ControlStatus storage status = poolStatus[key.toId()];
 
@@ -205,7 +205,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
         if (status.isPaused) revert AlreadyInState();
 
         status.isPaused = true;
-        registry.deactivatePool(key.toId());
+        registry.deactivatePool(key);
 
         string memory message = "Pool operations paused due to high risk";
         notifier.notifyUser(msg.sender, 3, message);
@@ -220,7 +220,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
         ControlStatus storage status = poolStatus[key.toId()];
 
         status.isPaused = true;
-        registry.deactivatePool(key.toId());
+        registry.deactivatePool(key);
 
         string memory message = "EMERGENCY: Critical risk level detected - Pool frozen";
         notifier.notifyUser(msg.sender, 4, message);

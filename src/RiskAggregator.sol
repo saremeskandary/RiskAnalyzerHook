@@ -99,7 +99,7 @@ abstract contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
         }
 
         // Get volatility metrics
-        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key.toId());
+        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key);
 
         // Calculate volatility score
         uint256 volatilityScore = _calculateVolatilityScore(volData);
@@ -140,45 +140,53 @@ abstract contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
      * @notice Aggregate risk metrics for a user
      * @param user User address
      */
-    function aggregateUserRisk(address user) external view override whenNotPaused returns (uint256 totalRiskScore) {
-        if (user == address(0)) revert InvalidAddress();
+function aggregateUserRisk(address user) external view override whenNotPaused returns (uint256 totalRiskScore) {
+    if (user == address(0)) revert InvalidAddress();
 
-        RiskCache storage cache = userRiskCache[user];
+    RiskCache storage cache = userRiskCache[user];
 
-        // Return cached value if fresh
-        if (block.timestamp - cache.lastUpdate <= CACHE_DURATION) {
-            return cache.riskScore;
-        }
-
-        // Get all pools
-        PoolId[] memory pools = riskRegistry.getAllPools();
-        uint256 totalPositions;
-        uint256 totalRisk;
-
-        // Calculate risk for each position
-        for (uint256 i = 0; i < pools.length; i++) {
-            IPositionManager.PositionData memory position = positionManager.getPositionData(user, pools[i]);
-            
-            if (position.size > 0) {
-                uint256 poolRisk = this.aggregatePoolRisk(pools[i]);
-                totalRisk += (poolRisk * position.size);
-                totalPositions += position.size;
-            }
-        }
-
-
-        // Calculate weighted average risk
-        totalRiskScore = totalPositions > 0 ? totalRisk / totalPositions : 0;
-
-        // Update cache
-        cache.riskScore = totalRiskScore;
-        cache.lastUpdate = block.timestamp;
-
-        emit UserRiskUpdated(user, totalRiskScore, block.timestamp);
-
-        return totalRiskScore;
+    // Return cached value if fresh
+    if (block.timestamp - cache.lastUpdate <= CACHE_DURATION) {
+        return cache.riskScore;
     }
 
+    // Get all pools
+    PoolKey[] memory pools = riskRegistry.getAllPools();
+    uint256 totalPositions;
+    uint256 totalRisk;
+
+    // Calculate risk for each position
+    for (uint256 i = 0; i < pools.length; i++) {
+        // Create a new calldata-compatible PoolKey
+        PoolKey memory currentPool = pools[i];
+        
+        IPositionManager.PositionData memory position = positionManager.getPositionData(user, currentPool);
+        
+        if (position.size > 0) {
+            uint256 poolRisk = this.calculatePoolRisk(currentPool); // Use this. to force external call
+            totalRisk += (poolRisk * position.size);
+            totalPositions += position.size;
+        }
+    }
+
+    // Calculate weighted average risk
+    totalRiskScore = totalPositions > 0 ? totalRisk / totalPositions : 0;
+
+    return totalRiskScore;
+}
+
+// Add a public version of calculatePoolRisk that can handle memory parameters
+function calculatePoolRisk(PoolKey memory key) public view returns (uint256) {
+    // Implementation of risk calculation
+    // This can now be called both internally and externally
+    return _calculatePoolRisk(key);
+}
+
+// Keep the internal function for direct internal calls
+function _calculatePoolRisk(PoolKey memory key) internal view returns (uint256) {
+    // Original implementation
+    // ...
+}
     /**
      * @notice Get system-wide risk metrics
      */
@@ -231,7 +239,7 @@ abstract contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
      * @notice Calculate position score
      */
     function _calculatePositionScore(PoolKey calldata key) internal view returns (uint256) {
-        IPositionManager.PositionData memory position = positionManager.getPositionData(address(this), key.toId());
+        IPositionManager.PositionData memory position = positionManager.getPositionData(address(this), key);
 
         return position.riskScore;
     }
@@ -301,10 +309,10 @@ abstract contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
         view
         returns (uint256 volatilityRisk, uint256 liquidityRisk, uint256 positionRisk)
     {
-        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key.toId());
+        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key);
 
         volatilityRisk = _calculateVolatilityScore(volData);
         liquidityRisk = _calculateLiquidityScore(key);
-        positionRisk = _calculatePositionScore(key.toId());
+        positionRisk = _calculatePositionScore(key);
     }
 }

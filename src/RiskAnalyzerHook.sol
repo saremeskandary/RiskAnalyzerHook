@@ -12,6 +12,7 @@ import {BaseHook} from "lib/v4-periphery/src/base/hooks/BaseHook.sol";
 import "./interfaces.sol";
 import {Ownable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import "../lib/RiskMath.sol";
+import {Currency, CurrencyLibrary} from "lib/v4-core/src/types/Currency.sol";
 /**
  * @title RiskAnalyzerHook
  * @notice Main hook contract for Uniswap v4 risk analysis
@@ -106,29 +107,51 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
         });
     }
 
-    function calculatePoolRisk(PoolId poolId) external view returns (uint256 totalRiskScore) {
-        // Calculate risk without updating cache
-        uint256 volatilityScore = riskRegistry.calculateVolatilityScore(volatilityOracle.getVolatilityData(poolId));
-        uint256 liquidityScore = riskRegistry.calculateLiquidityScore(poolId);
-        uint256 positionScore = riskRegistry.calculatePositionScore(poolId);
+function calculatePoolRisk(PoolKey calldata key) external view returns (uint256 totalRiskScore) {
+    // Get pool state
+    (uint160 sqrtPriceX96,,,,) = poolManager.getSlot0(key.toId());
+    
+    // Get volatility data and convert to registry format
+    IVolatilityOracle.VolatilityData memory oracleData = volatilityOracle.getVolatilityData(key);
+    IRiskRegistry.VolatilityData memory registryData = IRiskRegistry.VolatilityData({
+        prices: oracleData.prices,
+        windowSize: oracleData.windowSize,
+        currentIndex: oracleData.currentIndex
+    });
 
-        uint256[] memory scores = new uint256[](3);
-        uint256[] memory weights = new uint256[](3);
-        scores[0] = volatilityScore;
-        scores[1] = liquidityScore;
-        scores[2] = positionScore;
-        weights[0] = VOLATILITY_WEIGHT;
-        weights[1] = LIQUIDITY_WEIGHT;
-        weights[2] = POSITION_WEIGHT;
+    // Calculate individual risk scores
+    uint256 volatilityScore = riskRegistry.calculateVolatilityScore(registryData);
+    uint256 liquidityScore = liquidityScoring.calculateLiquidityScore(
+        poolManager.getLiquidityAmount(key.toId()), // Use correct function name
+        int256(uint256(sqrtPriceX96)),
+        key.currency0.toAddress(),
+        key.currency1.toAddress(),
+        key,
+        -887272,  // Default min tick
+        887272   // Default max tick
+    );
+    uint256 positionScore = _calculatePositionRisk(key, 0, 0, 0);
 
-        return RiskMath.calculateWeightedRisk(scores, weights);
-    }
+    // Calculate weighted risk score
+    uint256[] memory scores = new uint256[](3);
+    uint256[] memory weights = new uint256[](3);
+    
+    scores[0] = volatilityScore;
+    scores[1] = liquidityScore;
+    scores[2] = positionScore;
+    
+    weights[0] = VOLATILITY_WEIGHT;
+    weights[1] = LIQUIDITY_WEIGHT;
+    weights[2] = POSITION_WEIGHT;
+
+    return RiskMath.calculateWeightedRisk(scores, weights);
+}
 
     function calculateUserRisk(address user) external view returns (uint256 totalRiskScore) {
         if (user == address(0)) revert InvalidAddress();
 
         // Get all pools
-        PoolId[] memory pools = riskRegistry.getAllPools();
+        PoolKey [] memory pools = riskRegistry.getAllPools();
         uint256 totalPositions;
         uint256 totalRisk;
 
@@ -183,12 +206,11 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
     ) external override returns (bytes4, BeforeSwapDelta, uint24) {
         if (msg.sender != address(poolManager)) revert UnauthorizedCallback();
 
-        PoolId poolId = key.toId();
-        RiskMetrics storage metrics = poolMetrics[poolId];
+        RiskMetrics storage metrics = poolMetrics[key];
 
         // Update volatility with new price
         metrics.volatilityScore = volatilityOracle.calculateVolatility(
-            poolId, params.sqrtPriceLimitX96 > 0 ? int256(uint256(params.sqrtPriceLimitX96)) : metrics.lastPrice
+            key, params.sqrtPriceLimitX96 > 0 ? int256(uint256(params.sqrtPriceLimitX96)) : metrics.lastPrice
         );
 
         // Check if risk is too high
@@ -213,7 +235,6 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
     ) external override returns (bytes4, int128) {
         if (msg.sender != address(poolManager)) revert UnauthorizedCallback();
 
-        PoolId poolId = key.toId();
         int128 a = delta.amount0();
         _updatePoolMetrics(key, params.sqrtPriceLimitX96, a);
 
@@ -231,13 +252,11 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
     ) external override returns (bytes4) {
         if (msg.sender != address(poolManager)) revert UnauthorizedCallback();
 
-        PoolId poolId = key.toId();
-
         // Update liquidity position risk for adding liquidity
         positionManager.updatePositionRisk(
             sender,
-            poolId,
-            _calculatePositionRisk(poolId, uint256(params.liquidityDelta), params.tickLower, params.tickUpper)
+            key,
+            _calculatePositionRisk(key, uint256(params.liquidityDelta), params.tickLower, params.tickUpper)
         );
 
         // Check concentration risk
@@ -256,8 +275,6 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
         bytes calldata hookData
     ) external override returns (bytes4) {
         if (msg.sender != address(poolManager)) revert UnauthorizedCallback();
-
-        PoolId poolId = key.toId();
 
         // Update liquidity position risk for removing liquidity
         positionManager.updatePositionRisk(
@@ -282,7 +299,6 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
     ) external override returns (bytes4, BalanceDelta) {
         if (msg.sender != address(poolManager)) revert UnauthorizedCallback();
 
-        PoolId poolId = key.toId();
         _updatePoolMetrics(key, 0, delta.amount0());
 
         return (
@@ -301,7 +317,6 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
     ) external override returns (bytes4, BalanceDelta) {
         if (msg.sender != address(poolManager)) revert UnauthorizedCallback();
 
-        PoolId poolId = key.toId();
         _updatePoolMetrics(key, 0, delta.amount0());
 
         return (IHooks.afterRemoveLiquidity.selector, delta);
@@ -310,12 +325,12 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
      * @notice Calculate position risk score
      */
 
-    function _calculatePositionRisk(PoolId poolId, uint256 liquidityDelta, int24 tickLower, int24 tickUpper)
+    function _calculatePositionRisk(        PoolKey calldata key, uint256 liquidityDelta, int24 tickLower, int24 tickUpper)
         internal
         returns (uint256)
     {
         // Removed 'view' modifier
-        return riskAggregator.aggregatePoolRisk(poolId);
+        return riskAggregator.aggregatePoolRisk(key);
     }
 
     /**
@@ -419,8 +434,7 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
      * @notice Initialize hooks for a new pool
      */
     function initializePoolHooks(PoolKey calldata key) external {
-        PoolId poolId = key.toId();
-        if (poolMetrics[poolId].lastUpdateBlock > 0) revert InvalidPool();
+        if (poolMetrics[key].lastUpdateBlock > 0) revert InvalidPool();
 
         // Initialize all components for the pool using IRiskRegistry.RiskParameters
         IRiskRegistry.RiskParameters memory registryParams = IRiskRegistry.RiskParameters({
@@ -433,7 +447,7 @@ contract RiskAnalyzerHook is IUniswapV4RiskAnalyzerHook, BaseHook, Ownable {
         riskRegistry.registerPool(key, registryParams);
 
         // Initialize metrics using IUniswapV4RiskAnalyzerHook.RiskMetrics
-        poolMetrics[poolId] = RiskMetrics({
+        poolMetrics[key] = RiskMetrics({
             volatilityScore: 0,
             liquidityScore: 0,
             concentrationRisk: 0,

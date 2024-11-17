@@ -23,7 +23,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
     mapping(PoolId => mapping(address => bool)) public poolManagers;
 
     // List of registered pools
-    PoolId[] public registeredPools;
+    PoolKey[] public registeredPools;
 
     // Errors
     error PoolAlreadyRegistered();
@@ -54,19 +54,19 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
      * @param key Unique identifier for the pool
      * @param params Initial risk parameters
      */
-    function registerPool(PoolKey calldata key, RiskParameters memory params) external override onlyOwner {
-        if (poolParameters[key.toId()].isActive) revert PoolAlreadyRegistered();
-        if (params.volatilityThreshold == 0 || params.liquidityThreshold == 0) {
-            revert InvalidParameters();
-        }
-
-        poolParameters[key.toId()] = params;
-        poolParameters[key.toId()].isActive = true;
-        registeredPools.push(key.toId());
-
-        emit PoolRegistered(key.toId(), msg.sender);
-        emit RiskParametersUpdated(key.toId(), params);
+function registerPool(PoolKey calldata key, RiskParameters memory params) external override onlyOwner {
+    if (poolParameters[key.toId()].isActive) revert PoolAlreadyRegistered();
+    if (params.volatilityThreshold == 0 || params.liquidityThreshold == 0) {
+        revert InvalidParameters();
     }
+
+    poolParameters[key.toId()] = params;
+    poolParameters[key.toId()].isActive = true;
+    registeredPools.push(key); // Changed from key.toId() to key since array is PoolKey[]
+
+    emit PoolRegistered(key.toId(), msg.sender);
+    emit RiskParametersUpdated(key.toId(), params);
+}
 
     /**
  * @notice Calculates the volatility score for a given pool
@@ -178,8 +178,8 @@ function calculateVolatilityScore(VolatilityData memory volatilityData)
     /**
      * @notice Get all registered pools
      */
-    function getAllPools() external view returns (PoolId[] memory registeredPools) {
-        registeredPools = new PoolId[](0);
+    function getAllPools() external view returns (PoolKey[] memory registeredPools) {
+        registeredPools = new PoolKey[](0);
         return registeredPools;
     }
 
@@ -187,20 +187,20 @@ function calculateVolatilityScore(VolatilityData memory volatilityData)
      * @notice Get detailed information for all pools
      * @return poolInfos Array of pool information including parameters and status
      */
-    function getAllPoolInfo() external view returns (PoolInfo[] memory poolInfos) {
-        uint256 count = registeredPools.length;
-        poolInfos = new PoolInfo[](count);
+function getAllPoolInfo() external view returns (PoolInfo[] memory poolInfos) {
+    uint256 count = registeredPools.length;
+    poolInfos = new PoolInfo[](count);
 
-        for (uint256 i = 0; i < count; i++) {
-            PoolId poolId = registeredPools[i];
-            poolInfos[i] = PoolInfo({
-                poolId: poolId,
-                parameters: poolParameters[poolId],
-                registrationTime: block.timestamp, // Note: This would need a registration time mapping in actual implementation
-                isRegistered: poolParameters[poolId].isActive
-            });
-        }
+    for (uint256 i = 0; i < count; i++) {
+        PoolKey memory poolKey = registeredPools[i];
+        poolInfos[i] = PoolInfo({
+            key: poolKey, // Changed from poolId to key to match the struct
+            parameters: poolParameters[poolKey.toId()],
+            registrationTime: block.timestamp,
+            isRegistered: poolParameters[poolKey.toId()].isActive
+        });
     }
+}
 
     /**
      * @notice Check if a pool is registered
