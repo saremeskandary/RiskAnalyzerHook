@@ -55,28 +55,28 @@ contract PositionManager is IPositionManager, Ownable, Pausable, ReentrancyGuard
     /**
      * @notice Update the risk score for a user's position
      * @param user Address of the position owner
-     * @param poolId Unique identifier of the pool
+     * @param key Unique identifier of the pool
      * @param newRiskScore New risk score to assign
      */
-    function updatePositionRisk(address user, bytes32 poolId, uint256 newRiskScore) external override whenNotPaused {
+    function updatePositionRisk(address user, PoolKey calldata key, uint256 newRiskScore) external override whenNotPaused {
         // Only authorized risk assessors can update risk scores
-        if (!riskRegistry.isPoolManager(poolId, msg.sender)) {
+        if (!riskRegistry.isPoolManager(key.toId(), msg.sender)) {
             revert UnauthorizedAccess();
         }
 
         if (newRiskScore > MAX_RISK_SCORE) revert InvalidRiskScore();
 
-        PositionData storage position = positions[user][poolId];
+        PositionData storage position = positions[user][key.toId()];
         if (position.size == 0) revert PositionNotFound();
 
         position.riskScore = newRiskScore;
         position.lastUpdate = block.timestamp;
 
-        emit RiskScoreUpdated(user, poolId, newRiskScore);
+        emit RiskScoreUpdated(user, key.toId(), newRiskScore);
 
         // If risk is too high, attempt to close the position
         if (newRiskScore >= HIGH_RISK_THRESHOLD) {
-            closeRiskyPosition(user, poolId);
+            closeRiskyPosition(user, key.toId());
         }
     }
 
