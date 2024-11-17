@@ -33,6 +33,15 @@ interface IRiskAnalyzerHook {
         bool isActive;
     }
 
+    struct RiskMetricsImpl {
+        uint256 volatilityScore;
+        uint256 liquidityScore;
+        uint256 concentrationRisk;
+        int256 lastPrice;
+        uint256 lastUpdateBlock;
+        bool isHighRisk;
+    }
+
     /**
      * @notice Emitted when risk score is updated
      */
