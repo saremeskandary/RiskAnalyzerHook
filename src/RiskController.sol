@@ -80,11 +80,10 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
      */
     function executeAction(PoolKey calldata key, ActionType actionType)
         external
-        override
         onlyOwner
         whenNotPaused
         returns (bool)
-    {
+        {
         if (key.toId() == bytes32(0)) revert InvalidPoolId();
 
         ControlStatus storage status = poolStatus[key.toId()];
@@ -117,7 +116,6 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
     function getControlStatus(PoolKey calldata key)
         external
         view
-        override
         returns (bool isPaused, bool isThrottled, uint256 lastActionTimestamp)
     {
         ControlStatus storage status = poolStatus[key.toId()];
@@ -128,7 +126,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
      * @notice Reset control status
      * @param key Pool identifier
      */
-    function resetControls(PoolKey calldata key) external override onlyOwner {
+    function resetControls(PoolKey calldata key) external onlyOwner {
         ControlStatus storage status = poolStatus[key.toId()];
 
         status.isPaused = false;
@@ -207,7 +205,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
         if (status.isPaused) revert AlreadyInState();
 
         status.isPaused = true;
-        registry.deactivatePool(key);
+        registry.deactivatePool(key.toId());
 
         string memory message = "Pool operations paused due to high risk";
         notifier.notifyUser(msg.sender, 3, message);
@@ -222,7 +220,7 @@ contract RiskController is IRiskController, Ownable, Pausable, ReentrancyGuard {
         ControlStatus storage status = poolStatus[key.toId()];
 
         status.isPaused = true;
-        registry.deactivatePool(key);
+        registry.deactivatePool(key.toId());
 
         string memory message = "EMERGENCY: Critical risk level detected - Pool frozen";
         notifier.notifyUser(msg.sender, 4, message);

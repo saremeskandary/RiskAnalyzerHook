@@ -50,6 +50,7 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
 
     constructor() Ownable(msg.sender) {}
 
+
     /**
      * @notice Calculate comprehensive liquidity score
      */
@@ -61,13 +62,13 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
         PoolKey calldata key,
         int24 tickLower,
         int24 tickUpper
-    ) external override whenNotPaused returns (uint256) {
+    ) external whenNotPaused returns (uint256) {
         if (totalLiquidity == 0) revert InvalidLiquidity();
         if (currentPrice <= 0) revert InvalidPrice();
         if (tickLower >= tickUpper) revert InvalidTicks();
 
         // Calculate component scores
-        uint256 marketCapScore = calculateMarketCapScore(totalLiquidity, token0, token1);
+        uint256 marketCapScore = _calculateMarketCapScore(totalLiquidity, token0, token1);
 
         uint256 distributionScore = calculateDistributionScore(totalLiquidity, currentPrice, tickLower, tickUpper);
 
@@ -90,11 +91,31 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
     /**
      * @notice Calculate market cap based score
      */
+        function _calculateMarketCapScore(
+        uint256 totalLiquidity,
+        address token0,
+        address token1
+    ) internal view returns (uint256) {
+        if (tokenInfo[token0].marketCap == 0 || tokenInfo[token1].marketCap == 0) {
+            revert TokenNotInitialized();
+        }
+
+        // Get minimum market cap between tokens
+        uint256 minMarketCap = Math.min(tokenInfo[token0].marketCap, tokenInfo[token1].marketCap);
+
+        // Calculate liquidity to market cap ratio
+        uint256 liquidityRatio = (totalLiquidity * BASIS_POINTS) / minMarketCap;
+
+        // Score based on ratio (higher ratio = lower score)
+        if (liquidityRatio > BASIS_POINTS) {
+            return 0; // Too much liquidity compared to market cap = risky
+        }
+
+        return BASIS_POINTS - liquidityRatio;
+    }
+
     function calculateMarketCapScore(uint256 totalLiquidity, address token0, address token1)
-        public
-        view
-        override
-        returns (uint256)
+external view override returns (uint256)
     {
         if (tokenInfo[token0].marketCap == 0 || tokenInfo[token1].marketCap == 0) {
             revert TokenNotInitialized();
@@ -146,7 +167,10 @@ contract LiquidityScoring is ILiquidityScoring, Ownable, Pausable {
     /**
      * @notice Calculate stability score based on historical data
      */
-    function calculateStabilityScore(PoolKey calldata key, uint256 currentLiquidity) public view override returns (uint256) {
+    function calculateStabilityScore(
+    PoolKey calldata key,
+    uint256 currentLiquidity
+) public view returns (uint256) {
         LiquidityHistory storage history = liquidityHistory[key.toId()];
 
         if (history.liquidityValues.length < 2) {

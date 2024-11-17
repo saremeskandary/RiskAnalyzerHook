@@ -47,7 +47,7 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
      * @notice Get volatility data for a pool
      * @param key Pool identifier
      */
-    function getVolatilityData(PoolKey calldata key) external view override returns (VolatilityData memory) {
+    function getVolatilityData(PoolKey calldata key) external view returns (VolatilityData memory) {
         return volatilityData[key.toId()];
     }
 
@@ -56,7 +56,7 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
      * @param key Pool identifier
      * @param newPrice Latest price observation
      */
-    function calculateVolatility(PoolKey calldata key, int256 newPrice) external override returns (uint256) {
+    function calculateVolatility(PoolKey calldata key, int256 newPrice) external returns (uint256) {
         VolatilityData storage data = volatilityData[key.toId()];
         require(data.windowSize > 0, "Pool not initialized");
 
@@ -96,7 +96,7 @@ contract VolatilityOracle is IVolatilityOracle, Ownable {
      * @param key Pool identifier
      * @param newWindowSize New window size
      */
-    function updateVolatilityWindow(PoolKey calldata key, uint256 newWindowSize) external override onlyOwner {
+    function updateVolatilityWindow(PoolKey calldata key, uint256 newWindowSize) external onlyOwner {
         require(newWindowSize >= MIN_DATA_POINTS, "Window size too small");
         VolatilityData storage data = volatilityData[key.toId()];
         require(data.windowSize > 0, "Pool not initialized");

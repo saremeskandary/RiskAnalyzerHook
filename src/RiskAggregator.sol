@@ -13,7 +13,7 @@ import "./interfaces.sol";
  * @notice Aggregates risk metrics from various sources to provide comprehensive risk assessment
  * @dev Implements IRiskAggregator interface
  */
-contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
+abstract contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
     using PoolIdLibrary for PoolKey;
 
     // Component interfaces
@@ -88,7 +88,8 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
      * @param key Pool identifier
      */
     function aggregatePoolRisk(PoolKey calldata key) external whenNotPaused returns (uint256 totalRiskScore) {
-        if (key.toId() == bytes32(0)) revert InvalidPoolId();
+        // if (key.toId() == bytes32(0)) revert InvalidPoolId();
+        if (keccak256(abi.encode(key)) == keccak256(abi.encode(bytes32(0)))) revert InvalidPoolId();
 
         RiskCache storage cache = poolRiskCache[key.toId()];
 
@@ -98,7 +99,7 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
         }
 
         // Get volatility metrics
-        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key);
+        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key.toId());
 
         // Calculate volatility score
         uint256 volatilityScore = _calculateVolatilityScore(volData);
@@ -139,7 +140,7 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
      * @notice Aggregate risk metrics for a user
      * @param user User address
      */
-    function aggregateUserRisk(address user) external override whenNotPaused returns (uint256 totalRiskScore) {
+    function aggregateUserRisk(address user) external view override whenNotPaused returns (uint256 totalRiskScore) {
         if (user == address(0)) revert InvalidAddress();
 
         RiskCache storage cache = userRiskCache[user];
@@ -150,20 +151,21 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
         }
 
         // Get all pools
-        bytes32[] memory pools = riskRegistry.getAllPools();
+        PoolId[] memory pools = riskRegistry.getAllPools();
         uint256 totalPositions;
         uint256 totalRisk;
 
         // Calculate risk for each position
         for (uint256 i = 0; i < pools.length; i++) {
             IPositionManager.PositionData memory position = positionManager.getPositionData(user, pools[i]);
-
+            
             if (position.size > 0) {
                 uint256 poolRisk = this.aggregatePoolRisk(pools[i]);
                 totalRisk += (poolRisk * position.size);
                 totalPositions += position.size;
             }
         }
+
 
         // Calculate weighted average risk
         totalRiskScore = totalPositions > 0 ? totalRisk / totalPositions : 0;
@@ -229,7 +231,7 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
      * @notice Calculate position score
      */
     function _calculatePositionScore(PoolKey calldata key) internal view returns (uint256) {
-        IPositionManager.PositionData memory position = positionManager.getPositionData(address(this), key);
+        IPositionManager.PositionData memory position = positionManager.getPositionData(address(this), key.toId());
 
         return position.riskScore;
     }
@@ -299,10 +301,10 @@ contract RiskAggregator is IRiskAggregator, Ownable, Pausable {
         view
         returns (uint256 volatilityRisk, uint256 liquidityRisk, uint256 positionRisk)
     {
-        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key);
+        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key.toId());
 
         volatilityRisk = _calculateVolatilityScore(volData);
         liquidityRisk = _calculateLiquidityScore(key);
-        positionRisk = _calculatePositionScore(key);
+        positionRisk = _calculatePositionScore(key.toId());
     }
 }

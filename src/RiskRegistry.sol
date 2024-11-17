@@ -5,9 +5,10 @@ import {Ownable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-c
 import {ReentrancyGuard} from
     "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import {Pausable} from "lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/utils/Pausable.sol";
-import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
+import { PoolId } from "lib/v4-core/src/types/PoolId.sol";
 import "./interfaces.sol";
 import {PoolKey} from "lib/v4-core/src/types/PoolKey.sol";
+import "../lib/RiskMath.sol";
 
 /**
  * @title RiskRegistry
@@ -15,7 +16,6 @@ import {PoolKey} from "lib/v4-core/src/types/PoolKey.sol";
  * @dev Implements IRiskRegistry interface
  */
 contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
-    using PoolIdLibrary for PoolKey;
     // Mapping of pool ID to risk parameters
     mapping(PoolId => RiskParameters) public poolParameters;
 
@@ -69,13 +69,54 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
     }
 
     /**
+ * @notice Calculates the volatility score for a given pool
+ * @param poolId The ID of the pool to calculate volatility for
+ * @param historicalPrices An array of historical prices
+ * @param windowSize The number of periods to consider for volatility calculation
+ * @return The calculated volatility score
+ */
+/**
+ * @notice Calculates the volatility score for a given pool
+ * @param volatilityData The volatility data for the pool
+ * @return The calculated volatility score
+ */
+function calculateVolatilityScore(VolatilityData memory volatilityData) 
+    external 
+    pure 
+    returns (uint256) 
+{
+    require(volatilityData.prices.length >= volatilityData.windowSize, "Insufficient historical data");
+
+    // Calculate the standard deviation
+    uint256 sum = 0;
+    uint256 sqSum = 0;
+
+    for (uint256 i = volatilityData.prices.length - volatilityData.windowSize; i < volatilityData.prices.length; i++) {
+        int256 price = volatilityData.prices[i];
+        sum += uint256(price);
+        sqSum += uint256(price) ** 2;
+    }
+
+    uint256 mean = sum / volatilityData.windowSize;
+    uint256 variance = (sqSum / volatilityData.windowSize) - (mean ** 2);
+
+    // Calculate the standard deviation
+    uint256 stdDev = RiskMath.sqrt(variance);
+
+    // Normalize the standard deviation to a score between 0 and 100
+    uint256 normalizedStdDev = (stdDev * 100) / (RiskMath.sqrt(mean ** 2));
+
+    // Ensure the score doesn't exceed 100
+    return normalizedStdDev > 100 ? 100 : normalizedStdDev;
+}
+
+    /**
      * @notice Update risk parameters for pool
      * @param key Pool identifier
      * @param newParams Updated risk parameters
      */
     function updatePoolParameters(PoolKey calldata key, RiskParameters memory newParams)
         external
-        override
         onlyPoolManager(key)
         whenNotPaused
     {
@@ -94,7 +135,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
      * @notice Get risk parameters for pool
      * @param key Pool identifier
      */
-    function getPoolParameters(PoolKey calldata key) external view override returns (RiskParameters memory) {
+    function getPoolParameters(PoolKey calldata key) external view  returns (RiskParameters memory) {
         if (!poolParameters[key.toId()].isActive) revert PoolInactive();
         return poolParameters[key.toId()];
     }
@@ -103,7 +144,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
      * @notice Deactivate pool monitoring
      * @param key Pool identifier
      */
-    function deactivatePool(PoolKey calldata key) external override onlyOwner {
+    function deactivatePool(PoolKey calldata key) external onlyOwner {
         if (!poolParameters[key.toId()].isActive) revert PoolInactive();
         poolParameters[key.toId()].isActive = false;
     }
@@ -112,7 +153,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
      * @notice Activate pool monitoring
      * @param key Pool identifier
      */
-    function activatePool(PoolKey calldata key) external override onlyOwner {
+    function activatePool(PoolKey calldata key) external onlyOwner {
         if (poolParameters[key.toId()].volatilityThreshold == 0) revert PoolNotRegistered();
         poolParameters[key.toId()].isActive = true;
     }
@@ -138,6 +179,7 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
      * @notice Get all registered pools
      */
     function getAllPools() external view returns (PoolId[] memory registeredPools) {
+        registeredPools = new PoolId[](0);
         return registeredPools;
     }
 
@@ -200,17 +242,17 @@ contract RiskRegistry is IRiskRegistry, Ownable, Pausable, ReentrancyGuard {
         whenNotPaused
     {
         if (keys.length != newParams.length) revert InvalidParameters();
-
-        for (uint256 i = 0; i < keys.toId().length; i++) {
-            if (poolParameters[keys.toId()[i]].isActive) {
+        
+        for (uint256 i = 0; i < keys.length; i++) {
+            if (poolParameters[keys[i].toId()].isActive) {
                 if (newParams[i].volatilityThreshold == 0 || newParams[i].liquidityThreshold == 0) {
                     continue;
                 }
 
-                poolParameters[keys.toId()[i]] = newParams[i];
-                poolParameters[keys.toId()[i]].isActive = true;
+                poolParameters[keys[i].toId()] = newParams[i];
+                poolParameters[keys[i].toId()].isActive = true;
 
-                emit RiskParametersUpdated(keys.toId()[i], newParams[i]);
+                emit RiskParametersUpdated(keys[i].toId(), newParams[i]);
             }
         }
     }
