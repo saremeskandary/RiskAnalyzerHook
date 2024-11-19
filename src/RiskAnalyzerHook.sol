@@ -41,10 +41,10 @@ contract RiskAnalyzerHook is IRiskAnalyzerHook, IUniswapV4RiskAnalyzerHook, Base
     uint256 public constant POSITION_WEIGHT = 9000; // 90%
 
     // Mapping to track pool metrics
+
     mapping(PoolId => RiskMetrics) public poolMetrics;
     mapping(PoolId => CircuitBreaker) public circuitBreakers;
     mapping(PoolId => RiskMetricsImpl) public poolMetricsImpl;
-
 
     // Events
     event PoolRiskUpdated(PoolId indexed poolId, RiskMetrics metrics);
@@ -90,21 +90,27 @@ contract RiskAnalyzerHook is IRiskAnalyzerHook, IUniswapV4RiskAnalyzerHook, Base
         );
     }
 
-
-    function getPoolRiskMetrics(PoolKey calldata key) external view override returns (RiskMetrics memory) {
+    function getPoolRiskMetrics(PoolKey calldata key)
+        external
+        view
+        override(IRiskAnalyzerHook)
+        returns (IRiskAnalyzerHook.RiskMetrics memory)
+    {
         RiskMetricsImpl memory impl = poolMetricsImpl[key.toId()];
-        return RiskMetrics({
-            volatility: impl.volatilityScore,      // Match interface field name
-            liquidityDepth: impl.liquidityScore,    // Match interface field name
-            concentrationRisk: impl.concentrationRisk,
-            lastUpdateBlock: impl.lastUpdateBlock,
-            lastPrice: impl.lastPrice,
-            updateCounter: 0                        // Add missing interface field
-        });
+
+        return IRiskAnalyzerHook.RiskMetrics(
+            impl.volatilityScore, // volatility
+            impl.liquidityScore, // liquidityDepth
+            impl.concentrationRisk, // concentrationRisk
+            impl.lastUpdateBlock, // lastUpdateBlock
+            impl.lastPrice, // lastPrice
+            0 // updateCounter
+        );
     }
     /**
      * @notice Returns the hook permissions
      */
+
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: false,
@@ -124,60 +130,80 @@ contract RiskAnalyzerHook is IRiskAnalyzerHook, IUniswapV4RiskAnalyzerHook, Base
         });
     }
 
+    /**
+     * @notice Get current risk parameters for a pool
+     * @param key The pool key
+     * @return parameters The current risk parameters
+     */
+    function getRiskParameters(PoolKey calldata key) external view returns (RiskParameters memory) {
+        // Get parameters from registry
+        IRiskRegistry.RiskParameters memory registryParams = riskRegistry.getPoolParameters(key);
 
-function calculatePoolRisk(PoolKey calldata key) external view returns (uint256 totalRiskScore) {
-    // Get volatility data first
-    IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key);
-    
-    // Convert VolatilityData to IRiskRegistry.VolatilityData
-    IRiskRegistry.VolatilityData memory registryVolData = IRiskRegistry.VolatilityData({
-        historicalVolatility: volData.historicalVolatility,
-        impliedVolatility: volData.impliedVolatility,
-        timestamp: volData.timestamp,
-        window: volData.window
-    });
+        // Convert registry parameters to RiskParameters format
+        RiskParameters memory parameters = RiskParameters({
+                volatilityThreshold: registryParams.maxVolatility,
+            liquidityThreshold: registryParams.minLiquidity,
+            concentrationThreshold: registryParams.maxConcentration,
+            isActive: registryParams.circuitBreakerEnabled
+        });
 
-    // Get current pool state for price and liquidity
-    (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
-    
-    // Safe conversion of sqrtPriceX96 to int256
-    int256 price;
-    unchecked {
-        price = int256(uint256(sqrtPriceX96));
+        return parameters;
     }
 
-    // Calculate individual risk scores
-    uint256 volatilityScore = riskRegistry.calculateVolatilityScore(registryVolData);
-    uint256 liquidityScore = liquidityScoring.calculateLiquidityScore(
-        poolManager.getLiquidity(key.toId()),
-        price,  // Now passing properly converted int256
-        Currency.unwrap(key.currency0),
-        Currency.unwrap(key.currency1),
-        key,
-        -887272,
-        887272
-    );
-    uint256 positionScore = _calculatePositionRisk(key, 0, 0, 0);
+    function calculatePoolRisk(PoolKey calldata key) external view returns (uint256 totalRiskScore) {
+        // Get volatility data first
+        IVolatilityOracle.VolatilityData memory volData = volatilityOracle.getVolatilityData(key);
 
-    // Calculate weighted risk score
-    uint256[] memory scores = new uint256[](3);
-    uint256[] memory weights = new uint256[](3);
-    
-    scores[0] = volatilityScore;
-    scores[1] = liquidityScore;
-    scores[2] = positionScore;
-    
-    weights[0] = VOLATILITY_WEIGHT;
-    weights[1] = LIQUIDITY_WEIGHT;
-    weights[2] = POSITION_WEIGHT;
+        // Convert VolatilityData to IRiskRegistry.VolatilityData
+        IRiskRegistry.VolatilityData memory registryVolData = IRiskRegistry.VolatilityData({
+            historicalVolatility: volData.historicalVolatility,
+            impliedVolatility: volData.impliedVolatility,
+            timestamp: volData.timestamp,
+            window: volData.window
+        });
 
-    return RiskMath.calculateWeightedRisk(scores, weights);
-}
+        // Get current pool state for price and liquidity
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(key.toId());
+
+        // Safe conversion of sqrtPriceX96 to int256
+        int256 price;
+        unchecked {
+            price = int256(uint256(sqrtPriceX96));
+        }
+
+        // Calculate individual risk scores
+        uint256 volatilityScore = riskRegistry.calculateVolatilityScore(registryVolData);
+        uint256 liquidityScore = liquidityScoring.calculateLiquidityScore(
+            poolManager.getLiquidity(key.toId()),
+            price, // Now passing properly converted int256
+            Currency.unwrap(key.currency0),
+            Currency.unwrap(key.currency1),
+            key,
+            -887272,
+            887272
+        );
+        uint256 positionScore = _calculatePositionRisk(key, 0, 0, 0);
+
+        // Calculate weighted risk score
+        uint256[] memory scores = new uint256[](3);
+        uint256[] memory weights = new uint256[](3);
+
+        scores[0] = volatilityScore;
+        scores[1] = liquidityScore;
+        scores[2] = positionScore;
+
+        weights[0] = VOLATILITY_WEIGHT;
+        weights[1] = LIQUIDITY_WEIGHT;
+        weights[2] = POSITION_WEIGHT;
+
+        return RiskMath.calculateWeightedRisk(scores, weights);
+    }
+
     function calculateUserRisk(address user) external view returns (uint256 totalRiskScore) {
         if (user == address(0)) revert InvalidAddress();
 
         // Get all pools
-        PoolKey [] memory pools = riskRegistry.getAllPools();
+        PoolKey[] memory pools = riskRegistry.getAllPools();
         uint256 totalPositions;
         uint256 totalRisk;
 
@@ -280,9 +306,7 @@ function calculatePoolRisk(PoolKey calldata key) external view returns (uint256 
 
         // Update liquidity position risk for adding liquidity
         positionManager.updatePositionRisk(
-            sender,
-            key,
-            _calculatePositionRisk(key, uint256(params.liquidityDelta), params.tickLower, params.tickUpper)
+            sender, key, _calculatePositionRisk(key, uint256(params.liquidityDelta), params.tickLower, params.tickUpper)
         );
 
         // Check concentration risk
@@ -351,7 +375,7 @@ function calculatePoolRisk(PoolKey calldata key) external view returns (uint256 
      * @notice Calculate position risk score
      */
 
-    function _calculatePositionRisk(        PoolKey calldata key, uint256 liquidityDelta, int24 tickLower, int24 tickUpper)
+    function _calculatePositionRisk(PoolKey calldata key, uint256 liquidityDelta, int24 tickLower, int24 tickUpper)
         internal
         returns (uint256)
     {
@@ -423,23 +447,31 @@ function calculatePoolRisk(PoolKey calldata key) external view returns (uint256 
     /**
      * @notice Emergency shutdown of pool
      */
-    function emergencyShutdown(PoolKey calldata key) override external onlyOwner {
+    function emergencyShutdown(PoolKey calldata key)
+        external
+        override(IRiskAnalyzerHook, IUniswapV4RiskAnalyzerHook)
+        onlyOwner
+    {
         riskController.executeAction(key, IRiskController.ActionType.EMERGENCY);
         emit ActionTriggered(key.toId(), IRiskController.ActionType.EMERGENCY);
     }
-
     /**
      * @notice Resume pool operations
      */
-    function resumeOperations(PoolKey calldata key) external onlyOwner {
+
+    function resumeOperations(PoolKey calldata key)
+        external
+        override(IRiskAnalyzerHook, IUniswapV4RiskAnalyzerHook)
+        onlyOwner
+    {
         riskController.resetControls(key);
         riskRegistry.activatePool(key);
-        poolMetrics[key.toId()].isHighRisk = false;
+        poolMetricsImpl[key.toId()].isHighRisk = false; // Updated to use poolMetricsImpl
     }
-
     /**
      * @notice Get position risk data
      */
+
     function getPositionRisk(address user, PoolKey calldata key) external view returns (PositionRisk memory) {
         uint256 riskScore = riskAggregator.aggregateUserRisk(user);
 

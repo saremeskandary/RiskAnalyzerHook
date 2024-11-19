@@ -1,94 +1,163 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IPoolManager} from "lib/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolKey} from "lib/v4-core/src/types/PoolKey.sol";
-import {BalanceDelta} from "lib/v4-core/src/types/BalanceDelta.sol";
-import {PoolId, PoolIdLibrary} from "lib/v4-core/src/types/PoolId.sol";
+import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
+import {PoolKey} from "v4-core/src/types/PoolKey.sol";
+import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
+import {PoolId} from "v4-core/src/types/PoolId.sol";
+
+/**
+ * @title IRiskMetrics
+ * @notice Shared risk metric structures used across the system
+ */
+interface IRiskMetrics {
+    // Move struct definition here at contract level
+    struct RiskMetricsImpl {
+        uint256 volatilityScore;    // Current volatility score
+        uint256 liquidityScore;     // Liquidity score
+        uint256 concentrationRisk;  // Concentration risk measure
+        uint256 lastUpdateBlock;    // Last update block number
+        int256 lastPrice;          // Last recorded price
+        bool isHighRisk;           // High risk flag
+    }
+    /**
+     * @notice Core risk metrics for pool analysis
+     */
+    struct RiskMetrics {
+        uint256 volatilityScore;    // Current volatility measurement
+        uint256 liquidityScore;     // Liquidity depth and distribution score
+        uint256 concentrationRisk;  // Measure of liquidity concentration
+        int256 lastPrice;           // Last recorded price
+        uint256 lastUpdateBlock;    // Block number of last update
+        bool isHighRisk;            // Current high risk status
+    }
+
+    /**
+     * @notice Position-specific risk metrics
+     */
+    struct PositionRisk {
+        uint256 size;              // Position size
+        int24 tickLower;          // Lower tick bound
+        int24 tickUpper;          // Upper tick bound
+        uint256 riskScore;        // Calculated risk score
+        uint256 lastAssessment;   // Timestamp of last assessment
+    }
+
+    /**
+     * @notice Circuit breaker configuration
+     */
+    struct CircuitBreaker {
+        uint256 threshold;        // Threshold for triggering circuit breaker
+        uint256 cooldownPeriod;   // Required cooldown between triggers
+        uint256 lastTriggered;    // Last trigger timestamp
+        bool isActive;            // Current circuit breaker status
+    }
+
+    /**
+     * @notice Risk control parameters for a pool
+     */
+    struct RiskParameters {
+        uint256 maxVolatility;         // Maximum acceptable volatility
+        uint256 minLiquidity;          // Minimum required liquidity
+        uint256 maxConcentration;      // Maximum acceptable concentration
+        uint256 cooldownPeriod;        // Period between risk assessments
+        bool circuitBreakerEnabled;    // Circuit breaker status
+    }
+}
 
 /**
  * @title IRiskAnalyzerHook
- * @notice Interface for the main Risk Analyzer hook contract
+ * @notice Main interface for the Uniswap V4 risk analyzer hook
  */
-interface IRiskAnalyzerHook {
+interface IRiskAnalyzerHook is IRiskMetrics {
     /**
-     * @notice Risk metrics structure
-     */
-    struct RiskMetrics {
-        uint256 volatility;
-        uint256 liquidityDepth;
-        uint256 concentrationRisk;
-        uint256 lastUpdateBlock;
-        int256 lastPrice;
-        uint256 updateCounter;
-    }
-
-    /**
-     * @notice Circuit breaker configuration structure
-     */
-    struct CircuitBreaker {
-        uint256 threshold;
-        uint256 cooldownPeriod;
-        uint256 lastTriggered;
-        bool isActive;
-    }
-
-    struct RiskMetricsImpl {
-        uint256 volatilityScore;
-        uint256 liquidityScore;
-        uint256 concentrationRisk;
-        int256 lastPrice;
-        uint256 lastUpdateBlock;
-        bool isHighRisk;
-    }
-
-    /**
-     * @notice Emitted when risk score is updated
+     * @notice Events
      */
     event RiskScoreUpdated(PoolId indexed poolId, uint256 newRiskScore);
-
-    /**
-     * @notice Emitted when high risk is detected
-     */
-    event HighRiskAlert(PoolId indexed poolId, uint256 riskScore, string reason);
-
-    /**
-     * @notice Emitted when position risk is updated
-     */
+    event HighRiskDetected(PoolId indexed poolId, uint256 riskScore, string reason);
     event PositionRiskUpdated(address indexed user, PoolId indexed poolId, uint256 riskScore);
+    event CircuitBreakerTriggered(PoolId indexed poolId, uint256 timestamp);
+    event RiskParametersUpdated(PoolKey indexed key, RiskParameters parameters);
 
     /**
-     * @notice Get risk metrics for a pool
+     * @notice Core risk analysis functions
      */
-    function getPoolRiskMetrics(PoolKey calldata key) external view returns (RiskMetrics memory);
+    function calculatePoolRisk(PoolKey calldata key) external view returns (uint256 totalRiskScore);
+    function calculateUserRisk(address user) external view returns (uint256 totalRiskScore);
+    function getSystemRisk() 
+        external 
+        view 
+        returns (
+            uint256 totalRisk, 
+            uint256 averageRisk, 
+            uint256 highRiskCount
+        );
 
     /**
-     * @notice Get position risk score for a user
+     * @notice Risk metric queries
      */
-    function getPositionRiskScore(address user, PoolKey calldata key) external view returns (uint256);
-
-    /**
-     * @notice Get circuit breaker status
-     */
+    function getRiskMetrics(PoolKey calldata key) external view returns (RiskMetrics memory);
+    function getPositionRisk(address user, PoolKey calldata key) external view returns (PositionRisk memory);
+    function getRiskParameters(PoolKey calldata key) external view returns (RiskParameters memory);
     function getCircuitBreaker(PoolKey calldata key) external view returns (CircuitBreaker memory);
 
     /**
-     * @notice Update risk parameters
+     * @notice Risk management functions
      */
-    function updateRiskParameters(PoolKey calldata key, uint256 newVolatilityThreshold, uint256 newLiquidityThreshold)
-        external;
-
-    /**
-     * @notice Emergency shutdown of pool
-     */
+    function updateRiskParameters(PoolKey calldata key, RiskParameters calldata newParams) external;
     function emergencyShutdown(PoolKey calldata key) external;
+    function resumeOperations(PoolKey calldata key) external;
 
     /**
-     * @notice Resume pool operations
+     * @notice Required Uniswap V4 hooks
      */
-    function resumeOperations(PoolKey calldata key) external;
-}
+    function beforeSwap(
+        address sender,
+        PoolKey calldata key,
+        IPoolManager.SwapParams calldata params,
+        bytes calldata hookData
+    ) external returns (bytes4, bytes memory, uint24);
 
+    function afterSwap(
+        address sender,
+        PoolKey calldata key,
+        IPoolManager.SwapParams calldata params,
+        BalanceDelta delta,
+        bytes calldata hookData
+    ) external returns (bytes4);
+
+    function beforeAddLiquidity(
+        address sender,
+        PoolKey calldata key,
+        IPoolManager.ModifyLiquidityParams calldata params,
+        bytes calldata hookData
+    ) external returns (bytes4);
+
+    function afterAddLiquidity(
+        address sender,
+        PoolKey calldata key,
+        IPoolManager.ModifyLiquidityParams calldata params,
+        BalanceDelta delta,
+        BalanceDelta fees,
+        bytes calldata hookData
+    ) external returns (bytes4);
+
+    function beforeRemoveLiquidity(
+        address sender,
+        PoolKey calldata key,
+        IPoolManager.ModifyLiquidityParams calldata params,
+        bytes calldata hookData
+    ) external returns (bytes4);
+
+    function afterRemoveLiquidity(
+        address sender,
+        PoolKey calldata key,
+        IPoolManager.ModifyLiquidityParams calldata params,
+        BalanceDelta delta,
+        BalanceDelta fees,
+        bytes calldata hookData
+    ) external returns (bytes4);
+}
 /**
  * @title ILiquidityScoring
  * @notice Interface for liquidity scoring functionality
